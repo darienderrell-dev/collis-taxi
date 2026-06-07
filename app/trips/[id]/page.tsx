@@ -87,6 +87,11 @@ export default function TripPage({
         <div className="text-lg font-semibold mt-1">
           {booking.pickupZone} → {booking.dropoffZone}
         </div>
+        {booking.seriesId && (
+          <div className="mt-1 inline-flex items-center gap-1 text-[11px] uppercase tracking-wider bg-amber-500/15 border border-amber-500/30 text-amber-200 rounded-full px-2 py-0.5">
+            ↻ Part of your weekly ride
+          </div>
+        )}
         {(booking.pickupDetail || booking.dropoffDetail) && (
           <div className="text-xs text-slate-400 mt-1 space-y-0.5">
             {booking.pickupDetail && (

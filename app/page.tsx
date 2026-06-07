@@ -13,7 +13,7 @@ import { useAuthActions } from "@convex-dev/auth/react";
 import * as Sentry from "@sentry/nextjs";
 import { api } from "@/convex/_generated/api";
 import { StatusBanner } from "@/components/StatusBanner";
-import { fmtMoney, relTime } from "@/lib/fmt";
+import { fmtMoney, relTime, weekdayLabel } from "@/lib/fmt";
 import type { Doc } from "@/convex/_generated/dataModel";
 
 export default function HomePage() {
@@ -86,7 +86,9 @@ function SignedIn() {
 function ClientHome({ me }: { me: Doc<"users"> }) {
   const myActive = useQuery(api.bookings.myActiveBooking);
   const myTrips = useQuery(api.bookings.listMine);
+  const mySeries = useQuery(api.recurring.listMine);
   const cancelBooking = useMutation(api.bookings.cancelByClient);
+  const cancelSeries = useMutation(api.recurring.cancelSeries);
   const { signOut } = useAuthActions();
 
   async function quickCancel(id: Doc<"bookings">["_id"]) {
@@ -164,6 +166,62 @@ function ClientHome({ me }: { me: Doc<"users"> }) {
         >
           Book a ride
         </Link>
+      )}
+
+      {/* Weekly rides — only shown if the user has at least one active series. */}
+      {mySeries && mySeries.some((s) => s.active) && (
+        <div className="mt-8">
+          <div className="text-xs uppercase tracking-wider text-slate-400 mb-3">
+            Your weekly rides
+          </div>
+          <div className="space-y-2">
+            {mySeries
+              .filter((s) => s.active)
+              .map((s) => (
+                <div
+                  key={s._id}
+                  className="p-3 rounded-xl bg-slate-900 border border-slate-800"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium truncate">
+                      {s.pickupZone} → {s.dropoffZone}
+                    </div>
+                    <div className="text-xs text-amber-300 whitespace-nowrap">
+                      ↻ weekly
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between text-xs mt-1">
+                    <div className="text-slate-400">
+                      Every {weekdayLabel(s.dayOfWeek)} at {s.timeOfDay}
+                    </div>
+                    <div className="text-slate-300">{fmtMoney(s.price)}</div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (
+                        !confirm(
+                          "Stop this weekly ride? Future bookings will be cancelled.",
+                        )
+                      )
+                        return;
+                      try {
+                        await cancelSeries({ id: s._id });
+                      } catch (e) {
+                        alert(
+                          e instanceof Error
+                            ? e.message
+                            : "Couldn't cancel series",
+                        );
+                      }
+                    }}
+                    className="mt-2 w-full py-2 rounded-lg bg-slate-950 border border-slate-800 text-rose-300 text-xs font-semibold"
+                  >
+                    Stop weekly ride
+                  </button>
+                </div>
+              ))}
+          </div>
+        </div>
       )}
 
       <div className="mt-8">

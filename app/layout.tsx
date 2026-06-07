@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import { ConvexClientProvider } from "@/lib/convex/provider";
 import { InstallButton } from "@/components/InstallButton";
+import { RegisterSW } from "@/components/RegisterSW";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -33,6 +34,9 @@ export default function RootLayout({
             {/* Visual cover for the iOS status-bar area — see globals.css.
                 Keeps clock/signal legible while content scrolls under. */}
             <div className="status-bar-shim" aria-hidden />
+            {/* Registers /sw.js — required for Android Chrome to fire
+                beforeinstallprompt. */}
+            <RegisterSW />
             {children}
             <InstallButton />
           </ConvexClientProvider>

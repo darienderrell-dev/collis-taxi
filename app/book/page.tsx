@@ -8,7 +8,7 @@ import * as Sentry from "@sentry/nextjs";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { ZonePicker } from "@/components/ZonePicker";
-import { fmtMoney, fmtClock } from "@/lib/fmt";
+import { fmtMoney, fmtClock, weekdayLabel } from "@/lib/fmt";
 
 const QUEUE_CAP = 5;
 
@@ -52,6 +52,8 @@ function BookingForm() {
   );
   const [when, setWhen] = useState<"now" | "scheduled">("now");
   const [scheduledAt, setScheduledAt] = useState("");
+  // "Make this a weekly ride" toggle — only available on scheduled bookings.
+  const [makeWeekly, setMakeWeekly] = useState(false);
   const [notes, setNotes] = useState(params.get("notes") ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -83,6 +85,7 @@ function BookingForm() {
   const favorites = me?.favorites ?? [];
 
   const createBooking = useMutation(api.bookings.create);
+  const createSeries = useMutation(api.recurring.createSeries);
 
   // Block double-bookings on the client side
   if (activeTrip) {
@@ -130,6 +133,28 @@ function BookingForm() {
     }
     setSubmitting(true);
     try {
+      // Weekly path: create a series; the materializer immediately
+      // creates the first occurrence as a real booking and the daily
+      // cron keeps the next 14 days populated. Send the user to the
+      // home page so they can see "Your weekly rides" + the new trip.
+      if (when === "scheduled" && makeWeekly) {
+        const ts = new Date(scheduledAt);
+        const hh = String(ts.getHours()).padStart(2, "0");
+        const mm = String(ts.getMinutes()).padStart(2, "0");
+        await createSeries({
+          pickupZone: pickupName,
+          pickupDetail: pickupDetail || undefined,
+          dropoffZone: dropoffName,
+          dropoffDetail: dropoffDetail || undefined,
+          dayOfWeek: ts.getDay(),
+          timeOfDay: `${hh}:${mm}`,
+          notes: notes || undefined,
+          price,
+        });
+        router.push("/");
+        return;
+      }
+
       const newId = await createBooking({
         pickupZone: pickupName,
         pickupDetail: pickupDetail || undefined,
@@ -146,7 +171,7 @@ function BookingForm() {
       // The message still surfaces to the user via setErr below.
       Sentry.captureException(e, {
         tags: { feature: "booking.create" },
-        extra: { pickupName, dropoffName, when, scheduledAt },
+        extra: { pickupName, dropoffName, when, scheduledAt, makeWeekly },
       });
       setErr(e instanceof Error ? e.message : "Booking failed");
       setSubmitting(false);
@@ -327,6 +352,30 @@ function BookingForm() {
               )}
             </div>
           )}
+
+          {/* Weekly-repeat toggle — only meaningful on scheduled rides.
+              When on, we create a series instead of a one-off booking
+              and the cron keeps the next 14 days populated. */}
+          {when === "scheduled" && scheduledAt && (
+            <label className="mt-3 flex items-start gap-3 p-3 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={makeWeekly}
+                onChange={(e) => setMakeWeekly(e.target.checked)}
+                className="mt-0.5 w-5 h-5 accent-amber-500"
+              />
+              <div className="flex-1">
+                <div className="text-sm font-medium">
+                  Repeat every {weekdayLabel(new Date(scheduledAt).getDay())} at{" "}
+                  {fmtClock(new Date(scheduledAt).getTime())}
+                </div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  Same ride, same time, every week. Cancel any week from your
+                  trips, or cancel the whole series from home.
+                </div>
+              </div>
+            </label>
+          )}
         </div>
 
         <label className="block">
@@ -355,6 +404,8 @@ function BookingForm() {
         >
           {submitting
             ? "Sending request…"
+            : when === "scheduled" && makeWeekly
+            ? "Create weekly ride"
             : when === "scheduled"
             ? "Reserve slot"
             : "Request ride"}

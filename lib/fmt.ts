@@ -26,6 +26,16 @@ export function relTime(ms: number): string {
   return Math.floor(diff / 86400) + "d ago";
 }
 
+/**
+ * Day-of-week index (0=Sun..6=Sat per JS getDay()) → human label.
+ * Used by recurring bookings UI ("Every Monday at 8:00 AM").
+ */
+export function weekdayLabel(dow: number): string {
+  return ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][
+    dow
+  ] ?? "Unknown";
+}
+
 export function countdownLabel(targetMs: number): string {
   const diff = targetMs - Date.now();
   if (diff < -60000) return Math.floor(-diff / 60000) + "m late";

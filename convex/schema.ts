@@ -99,10 +99,33 @@ export default defineSchema({
     // Separate from status so we can mark a completed trip paid later
     // (he sometimes gets paid the next day).
     paidAt: v.optional(v.number()),
+    // Link to the recurring series this occurrence was materialized from.
+    // Lets us cancel future un-started bookings when a series is cancelled,
+    // and show a "weekly" badge on the trip page.
+    seriesId: v.optional(v.id("recurringSeries")),
   })
     .index("by_client", ["clientUserId"])
     .index("by_status", ["status"])
-    .index("by_scheduled", ["scheduledFor"]),
+    .index("by_scheduled", ["scheduledFor"])
+    .index("by_series", ["seriesId"]),
+
+  // Recurring weekly bookings. One row per active series; the daily
+  // materializer creates concrete bookings rows from these for the next
+  // 14 days so passengers see their upcoming rides in trip history.
+  recurringSeries: defineTable({
+    clientUserId: v.id("users"),
+    pickupZone: v.string(),
+    pickupDetail: v.optional(v.string()),
+    dropoffZone: v.string(),
+    dropoffDetail: v.optional(v.string()),
+    dayOfWeek: v.number(), // 0=Sun..6=Sat
+    timeOfDay: v.string(), // "HH:MM" local
+    notes: v.optional(v.string()),
+    price: v.number(),
+    active: v.boolean(),
+  })
+    .index("by_client", ["clientUserId"])
+    .index("by_active", ["active"]),
 
   bookingEvents: defineTable({
     bookingId: v.id("bookings"),

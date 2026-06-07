@@ -11,8 +11,10 @@
 import type * as auth from "../auth.js";
 import type * as blackouts from "../blackouts.js";
 import type * as bookings from "../bookings.js";
+import type * as crons from "../crons.js";
 import type * as driverConfig from "../driverConfig.js";
 import type * as http from "../http.js";
+import type * as recurring from "../recurring.js";
 import type * as seed from "../seed.js";
 import type * as users from "../users.js";
 import type * as zones from "../zones.js";
@@ -27,8 +29,10 @@ declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   blackouts: typeof blackouts;
   bookings: typeof bookings;
+  crons: typeof crons;
   driverConfig: typeof driverConfig;
   http: typeof http;
+  recurring: typeof recurring;
   seed: typeof seed;
   users: typeof users;
   zones: typeof zones;

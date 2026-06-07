@@ -15,4 +15,14 @@ crons.interval(
   internal.bookings.expireStaleRequests,
 );
 
+// Daily at 04:30 UTC (~00:30 local Guyana time): walk active recurring
+// series and create bookings for the next 14 days of occurrences.
+// Idempotent — running this more often is safe, but daily is enough for
+// a 14-day lookahead window.
+crons.daily(
+  "materialize recurring series",
+  { hourUTC: 4, minuteUTC: 30 },
+  internal.recurring.materializeRecurringSeries,
+);
+
 export default crons;
