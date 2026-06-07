@@ -17,7 +17,7 @@ import type { Doc } from "@/convex/_generated/dataModel";
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen flex items-start justify-center p-6">
+    <main className="min-h-dvh flex items-start justify-center p-6 pb-safe-with-install">
       <div className="max-w-md w-full pt-8">
         <header className="flex items-center gap-3 mb-8">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-3xl">

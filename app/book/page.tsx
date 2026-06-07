@@ -13,7 +13,7 @@ const QUEUE_CAP = 5;
 
 export default function BookPage() {
   return (
-    <main className="min-h-screen flex items-start justify-center p-6">
+    <main className="min-h-dvh flex items-start justify-center p-6 pb-safe-with-install">
       <div className="max-w-md w-full pt-8">
         <AuthLoading>
           <div className="text-sm text-slate-500">Loading…</div>
