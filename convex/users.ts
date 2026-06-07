@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getAuthUserId } from "@convex-dev/auth/server";
 
@@ -26,6 +26,54 @@ export const existsForPhone = query({
       .withIndex("phone", (q) => q.eq("phone", phone))
       .first();
     return !!user;
+  },
+});
+
+const FAVORITES_LIMIT = 3;
+
+/**
+ * Add a favorite to the current user's list (max 3).
+ */
+export const addFavorite = mutation({
+  args: {
+    label: v.string(),
+    zoneName: v.string(),
+    detail: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not signed in");
+    const user = await ctx.db.get(userId);
+    if (!user) throw new Error("User missing");
+    const existing = user.favorites ?? [];
+    if (existing.length >= FAVORITES_LIMIT) {
+      throw new Error(`You can save up to ${FAVORITES_LIMIT} favorites`);
+    }
+    const next = [
+      ...existing,
+      {
+        id: Math.random().toString(36).slice(2, 10),
+        label: args.label.trim(),
+        zoneName: args.zoneName.trim(),
+        detail: args.detail?.trim() || undefined,
+      },
+    ];
+    await ctx.db.patch(userId, { favorites: next });
+  },
+});
+
+/**
+ * Remove a favorite from the current user's list.
+ */
+export const removeFavorite = mutation({
+  args: { id: v.string() },
+  handler: async (ctx, { id }) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Not signed in");
+    const user = await ctx.db.get(userId);
+    if (!user) throw new Error("User missing");
+    const next = (user.favorites ?? []).filter((f) => f.id !== id);
+    await ctx.db.patch(userId, { favorites: next });
   },
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useMemo, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, Authenticated, AuthLoading, Unauthenticated } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -24,7 +24,9 @@ export default function BookPage() {
           </div>
         </Unauthenticated>
         <Authenticated>
-          <BookingForm />
+          <Suspense fallback={<div className="text-sm text-slate-500">Loading…</div>}>
+            <BookingForm />
+          </Suspense>
         </Authenticated>
       </div>
     </main>
@@ -33,19 +35,29 @@ export default function BookPage() {
 
 function BookingForm() {
   const router = useRouter();
+  const params = useSearchParams();
+
+  // Pre-fill from book-again query string (?pickup=...&dropoff=...&notes=...).
+  // Zones are resolved by name once the zones list loads.
   const [pickupId, setPickupId] = useState<Id<"zones"> | null>(null);
-  const [pickupName, setPickupName] = useState("");
-  const [pickupDetail, setPickupDetail] = useState("");
+  const [pickupName, setPickupName] = useState(params.get("pickup") ?? "");
+  const [pickupDetail, setPickupDetail] = useState(
+    params.get("pickupDetail") ?? "",
+  );
   const [dropoffId, setDropoffId] = useState<Id<"zones"> | null>(null);
-  const [dropoffName, setDropoffName] = useState("");
-  const [dropoffDetail, setDropoffDetail] = useState("");
+  const [dropoffName, setDropoffName] = useState(params.get("dropoff") ?? "");
+  const [dropoffDetail, setDropoffDetail] = useState(
+    params.get("dropoffDetail") ?? "",
+  );
   const [when, setWhen] = useState<"now" | "scheduled">("now");
   const [scheduledAt, setScheduledAt] = useState("");
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(params.get("notes") ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   // Live data
+  const me = useQuery(api.users.currentUser);
+  const zones = useQuery(api.zones.list);
   const driverConfig = useQuery(api.driverConfig.get);
   const queueDepth = useQuery(api.bookings.queueDepth) ?? 0;
   const activeTrip = useQuery(api.bookings.myActiveBooking); // checks if I already have an active booking
@@ -55,6 +67,19 @@ function BookingForm() {
       ? { zoneAId: pickupId, zoneBId: dropoffId }
       : "skip",
   );
+
+  // Resolve pre-filled zone NAMES to zone IDs once zones load. We do this
+  // imperatively in render — safe because setState on same value is a no-op.
+  if (zones && pickupName && !pickupId) {
+    const z = zones.find((z) => z.name === pickupName);
+    if (z) setPickupId(z._id);
+  }
+  if (zones && dropoffName && !dropoffId) {
+    const z = zones.find((z) => z.name === dropoffName);
+    if (z) setDropoffId(z._id);
+  }
+
+  const favorites = me?.favorites ?? [];
 
   const createBooking = useMutation(api.bookings.create);
 
@@ -149,6 +174,35 @@ function BookingForm() {
       )}
 
       <form onSubmit={submit} className="space-y-3">
+        {favorites.length > 0 && (
+          <div>
+            <div className="text-xs uppercase tracking-wider text-slate-400 mb-1">
+              Quick pick (favorites)
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {favorites.map((f) => (
+                <FavChip
+                  key={f.id}
+                  label={f.label}
+                  zoneName={f.zoneName}
+                  detail={f.detail}
+                  zones={zones ?? []}
+                  onApplyPickup={(id, name, det) => {
+                    setPickupId(id);
+                    setPickupName(name);
+                    if (det !== undefined) setPickupDetail(det);
+                  }}
+                  onApplyDropoff={(id, name, det) => {
+                    setDropoffId(id);
+                    setDropoffName(name);
+                    if (det !== undefined) setDropoffDetail(det);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
         <ZonePicker
           label="Pickup area"
           icon="🟢"
@@ -288,5 +342,45 @@ function BookingForm() {
         </div>
       </form>
     </>
+  );
+}
+
+function FavChip({
+  label,
+  zoneName,
+  detail,
+  zones,
+  onApplyPickup,
+  onApplyDropoff,
+}: {
+  label: string;
+  zoneName: string;
+  detail?: string;
+  zones: { _id: Id<"zones">; name: string }[];
+  onApplyPickup: (id: Id<"zones">, name: string, detail?: string) => void;
+  onApplyDropoff: (id: Id<"zones">, name: string, detail?: string) => void;
+}) {
+  const z = zones.find((z) => z.name === zoneName);
+  if (!z) return null; // favorite's zone got deleted from admin
+  return (
+    <div className="inline-flex items-center gap-1 bg-slate-900 border border-slate-800 rounded-full pl-2 pr-1 py-0.5 text-xs">
+      <span>⭐ {label}</span>
+      <button
+        type="button"
+        onClick={() => onApplyPickup(z._id, z.name, detail)}
+        className="ml-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300"
+        title="Set as pickup"
+      >
+        🟢
+      </button>
+      <button
+        type="button"
+        onClick={() => onApplyDropoff(z._id, z.name, detail)}
+        className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300"
+        title="Set as dropoff"
+      >
+        📍
+      </button>
+    </div>
   );
 }

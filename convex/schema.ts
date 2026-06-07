@@ -31,6 +31,17 @@ export default defineSchema({
     role: v.optional(
       v.union(v.literal("client"), v.literal("driver"), v.literal("admin")),
     ),
+    // Up to 3 favorite places for one-tap booking.
+    favorites: v.optional(
+      v.array(
+        v.object({
+          id: v.string(),
+          label: v.string(), // e.g. "Home", "Market"
+          zoneName: v.string(),
+          detail: v.optional(v.string()),
+        }),
+      ),
+    ),
   })
     .index("email", ["email"])
     .index("phone", ["phone"]),

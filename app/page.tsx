@@ -95,12 +95,17 @@ function ClientHome({ me }: { me: Doc<"users"> }) {
             {me.name?.split(" ")[0] ?? "there"}
           </div>
         </div>
-        <button
-          onClick={() => signOut()}
-          className="text-xs text-slate-400 underline"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-3 text-xs">
+          <Link href="/profile" className="text-amber-400 underline">
+            Favorites
+          </Link>
+          <button
+            onClick={() => signOut()}
+            className="text-slate-400 underline"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
 
       <StatusBanner />
@@ -143,28 +148,56 @@ function ClientHome({ me }: { me: Doc<"users"> }) {
         )}
         {myTrips && myTrips.length > 0 && (
           <div className="space-y-2">
-            {myTrips.slice(0, 6).map((b) => (
-              <Link
-                key={b._id}
-                href={`/trips/${b._id}`}
-                className="block p-3 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800/50"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-medium truncate">
-                    {b.pickupZone} → {b.dropoffZone}
+            {myTrips.slice(0, 6).map((b) => {
+              const closed = ["completed", "cancelled", "declined", "no_show"].includes(
+                b.status,
+              );
+              const bookAgainHref =
+                `/book?pickup=${encodeURIComponent(b.pickupZone)}` +
+                `&dropoff=${encodeURIComponent(b.dropoffZone)}` +
+                (b.pickupDetail
+                  ? `&pickupDetail=${encodeURIComponent(b.pickupDetail)}`
+                  : "") +
+                (b.dropoffDetail
+                  ? `&dropoffDetail=${encodeURIComponent(b.dropoffDetail)}`
+                  : "") +
+                (b.notes ? `&notes=${encodeURIComponent(b.notes)}` : "");
+              return (
+                <div
+                  key={b._id}
+                  className="p-3 rounded-xl bg-slate-900 border border-slate-800"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <Link
+                      href={`/trips/${b._id}`}
+                      className="flex-1 min-w-0 text-sm font-medium truncate hover:text-amber-300"
+                    >
+                      {b.pickupZone} → {b.dropoffZone}
+                    </Link>
+                    <div className="text-xs text-slate-400 whitespace-nowrap flex items-center gap-2">
+                      {relTime(b._creationTime)}
+                      {closed && (
+                        <Link
+                          href={bookAgainHref}
+                          title="Book again"
+                          className="text-amber-400 text-base leading-none px-1"
+                        >
+                          ↻
+                        </Link>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-xs text-slate-400 whitespace-nowrap">
-                    {relTime(b._creationTime)}
+                  <div className="flex items-center justify-between mt-1">
+                    <div className="text-xs uppercase tracking-wider text-slate-500">
+                      {b.status.replace(/_/g, " ")}
+                    </div>
+                    <div className="text-xs text-slate-300">
+                      {fmtMoney(b.price)}
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center justify-between mt-1">
-                  <div className="text-xs uppercase tracking-wider text-slate-500">
-                    {b.status.replace(/_/g, " ")}
-                  </div>
-                  <div className="text-xs text-slate-300">{fmtMoney(b.price)}</div>
-                </div>
-              </Link>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
