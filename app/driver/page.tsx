@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -194,8 +195,159 @@ function DriverDashboard() {
           </div>
         )}
       </div>
+
+      <PastTripsCard />
     </>
   );
+}
+
+/**
+ * Driver-facing trip history with a Today / Week / Month toggle.
+ * Shows total earned (completed trips only) and a list of closed-state
+ * trips so Collis can review his day at a glance and confirm cash
+ * collected matches what's in the app.
+ */
+function PastTripsCard() {
+  const [window, setWindow] = useState<"today" | "week" | "month">("today");
+  // Memoise the timestamp ranges so the query args are stable across renders.
+  const ranges = useMemo(() => buildDriverRanges(), []);
+  const range =
+    window === "today" ? ranges.today : window === "week" ? ranges.week : ranges.month;
+  const trips = useQuery(api.bookings.listForRange, range);
+
+  // Closed-state trips only — pending/active rows already show in the cards above.
+  const past = (trips ?? []).filter((t) =>
+    ["completed", "cancelled", "declined", "no_show"].includes(t.status),
+  );
+  const earned = past
+    .filter((t) => t.status === "completed")
+    .reduce((s, t) => s + t.price, 0);
+  const doneCount = past.filter((t) => t.status === "completed").length;
+
+  return (
+    <div className="mt-6 rounded-2xl bg-slate-900 border border-slate-800 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-xs uppercase tracking-wider text-slate-400">
+          Your trips
+        </div>
+        <div className="flex gap-1 bg-slate-800 rounded-lg p-1 text-[11px]">
+          {(["today", "week", "month"] as const).map((w) => (
+            <button
+              key={w}
+              onClick={() => setWindow(w)}
+              className={
+                "px-2.5 py-1 rounded-md " +
+                (window === w ? "bg-slate-600 text-white" : "text-slate-400")
+              }
+            >
+              {w === "today" ? "Today" : w === "week" ? "Week" : "Month"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {trips === undefined ? (
+        <div className="text-sm text-slate-500">Loading…</div>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/30 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-emerald-300">
+                Earned
+              </div>
+              <div className="text-xl font-bold text-emerald-200 mt-0.5">
+                {fmtMoney(earned)}
+              </div>
+            </div>
+            <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-slate-400">
+                Trips done
+              </div>
+              <div className="text-xl font-bold text-slate-100 mt-0.5">
+                {doneCount}
+              </div>
+            </div>
+          </div>
+
+          {past.length === 0 ? (
+            <div className="text-sm text-slate-500 bg-slate-950 border border-slate-800 rounded-xl p-3 text-center">
+              No closed trips in this window yet.
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {past.map((b) => {
+                const t = b.scheduledFor ?? b._creationTime;
+                const isLost = ["cancelled", "declined", "no_show"].includes(
+                  b.status,
+                );
+                return (
+                  <div
+                    key={b._id}
+                    className="p-2.5 rounded-xl bg-slate-950 border border-slate-800"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium truncate">
+                        {b.pickupZone} → {b.dropoffZone}
+                      </div>
+                      <div
+                        className={
+                          "text-[10px] uppercase tracking-wider whitespace-nowrap " +
+                          (isLost ? "text-rose-300" : "text-emerald-300")
+                        }
+                      >
+                        {b.status.replace(/_/g, " ")}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] mt-1">
+                      <div className="text-slate-400 truncate">
+                        <span aria-hidden>👤</span> {b.clientName ?? "Passenger"}
+                      </div>
+                      <div
+                        className={
+                          "whitespace-nowrap ml-2 " +
+                          (isLost
+                            ? "text-slate-500"
+                            : "text-amber-300 font-semibold")
+                        }
+                      >
+                        {fmtMoney(b.price)}
+                      </div>
+                    </div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">
+                      {fmtDateTime(t)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Today/Week/Month timestamp ranges anchored to local time.
+ * Mirrors the admin Reports tab so totals stay consistent.
+ */
+function buildDriverRanges() {
+  const now = new Date();
+  const startOfDay = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  const dow = now.getDay();
+  const daysSinceMon = (dow + 6) % 7;
+  const startOfWeek = startOfDay - daysSinceMon * 86400000;
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const endMs = startOfDay + 86400000;
+  return {
+    today: { startMs: startOfDay, endMs },
+    week: { startMs: startOfWeek, endMs },
+    month: { startMs: startOfMonth, endMs },
+  };
 }
 
 function AvailabilityToggle({

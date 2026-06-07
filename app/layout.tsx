@@ -30,6 +30,9 @@ export default function RootLayout({
           suppressHydrationWarning
         >
           <ConvexClientProvider>
+            {/* Visual cover for the iOS status-bar area — see globals.css.
+                Keeps clock/signal legible while content scrolls under. */}
+            <div className="status-bar-shim" aria-hidden />
             {children}
             <InstallButton />
           </ConvexClientProvider>

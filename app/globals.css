@@ -37,3 +37,26 @@ body {
 input, textarea, select {
   font-size: 16px;
 }
+
+/*
+ * Status-bar shim — fixed at the very top of the viewport, exactly the
+ * height of the iOS safe-area-inset-top (notch / Dynamic Island region).
+ * A translucent blurred backdrop keeps the time/signal/battery icons
+ * legible when the page scrolls and content slides underneath. Pointer
+ * events are off so it doesn't intercept taps.
+ *
+ * Body still owns the top padding (so first element of the page lays out
+ * below the shim at scroll-top=0). The shim is purely visual.
+ */
+.status-bar-shim {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: env(safe-area-inset-top, 0px);
+  background: rgba(11, 15, 23, 0.85);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 60;
+  pointer-events: none;
+}
