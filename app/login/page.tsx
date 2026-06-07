@@ -50,7 +50,7 @@ export default function LoginPage() {
         // the underlying signIn returns null even though the auth succeeded
         // server-side. We swallow ONLY that specific error and trust that the
         // Authenticated wrapper on `/` will reflect the new session.
-        async function safeSignIn(params: Record<string, unknown>) {
+        async function safeSignIn(params: Record<string, string>) {
           try {
             await signIn("password", params);
           } catch (err) {
