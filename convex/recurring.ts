@@ -3,6 +3,7 @@ import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { requireUserId } from "./users";
+import { findScheduledConflict } from "./bookings";
 
 // ----------------------------------------------------------------------
 // Recurring weekly bookings.
@@ -141,6 +142,12 @@ async function materializeForSeries(
     now.getMonth(),
     now.getDate(),
   );
+
+  // Pull driver config once so we can use the same slot window as the
+  // manual booking flow. Default to 30 if unconfigured.
+  const config = await ctx.db.query("driverConfig").first();
+  const slotMinutes = config?.slotMinutes ?? 30;
+
   let created = 0;
   for (let i = 0; i < LOOKAHEAD_DAYS; i++) {
     const day = new Date(startOfToday);
@@ -158,6 +165,22 @@ async function materializeForSeries(
       (b) => b.scheduledFor === day.getTime(),
     );
     if (dup) continue;
+
+    // Conflict with any other non-cancelled booking? If so, skip this
+    // occurrence silently. We don't want to crash the cron or send the
+    // passenger an error — but also don't want to overbook Collis.
+    const conflict = await findScheduledConflict(
+      ctx,
+      day.getTime(),
+      slotMinutes,
+    );
+    if (conflict) {
+      console.log(
+        `[recurring] skipped series=${series._id} at ${day.toISOString()} — ` +
+          `conflicts with booking=${conflict._id}`,
+      );
+      continue;
+    }
 
     const newId = await ctx.db.insert("bookings", {
       clientUserId: series.clientUserId,

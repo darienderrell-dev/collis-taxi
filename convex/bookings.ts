@@ -64,9 +64,22 @@ export const getById = query({
 });
 
 /**
- * The current client's latest active booking, if any. "Active" =
- * still in flight (any status before completion or cancellation).
+ * The current client's latest "you have something happening" booking,
+ * or null. This is what the home page and /book use to short-circuit
+ * to a "you already have a ride" view.
+ *
+ * IMPORTANT: a booking is "active" here only if it's about to happen
+ * or is happening now. Distant scheduled rides — including the 14-day
+ * lookahead of a weekly series — are deliberately excluded, otherwise
+ * a weekly subscriber could never book a one-off extra ride.
+ *
+ *   - ASAP requests are always active.
+ *   - Trips currently in motion (on_the_way / arrived / in_progress) are active.
+ *   - Scheduled requests/accepted are active only if they start within 2h.
+ *   - Cancelled/declined/no_show/completed are never active.
  */
+const NEAR_FUTURE_MS = 2 * 60 * 60 * 1000;
+
 export const myActiveBooking = query({
   args: {},
   handler: async (ctx) => {
@@ -75,12 +88,23 @@ export const myActiveBooking = query({
       .query("bookings")
       .withIndex("by_client", (q) => q.eq("clientUserId", userId))
       .collect();
+    const now = Date.now();
     const live = rows
-      .filter((b) =>
-        ["requested", "accepted", "queued", "on_the_way", "arrived", "in_progress"].includes(
-          b.status,
-        ),
-      )
+      .filter((b) => {
+        if (
+          ["completed", "cancelled", "declined", "no_show"].includes(b.status)
+        ) {
+          return false;
+        }
+        // Currently in motion regardless of scheduling.
+        if (["on_the_way", "arrived", "in_progress"].includes(b.status)) {
+          return true;
+        }
+        // ASAP request — counted active until driver acts.
+        if (b.scheduledFor === undefined) return true;
+        // Future scheduled: only if it's starting within 2 hours.
+        return b.scheduledFor - now < NEAR_FUTURE_MS;
+      })
       .sort((a, b) => b._creationTime - a._creationTime);
     return live[0] ?? null;
   },
@@ -336,6 +360,25 @@ export const create = mutation({
             : `Collis is unavailable right now${reason}. Tap Schedule to book for later.`,
         );
       }
+
+      // Slot collision — only for scheduled rides. ASAP rides get queued
+      // via the queue cap; they don't reserve a specific minute.
+      if (args.scheduledFor !== undefined) {
+        const conflict = await findScheduledConflict(
+          ctx,
+          args.scheduledFor,
+          config.slotMinutes,
+        );
+        if (conflict) {
+          const at = new Date(conflict.scheduledFor!).toLocaleTimeString(
+            undefined,
+            { hour: "numeric", minute: "2-digit" },
+          );
+          throw new Error(
+            `That time is already taken (another ride at ${at}). Please pick a different time.`,
+          );
+        }
+      }
     }
 
     const id = await ctx.db.insert("bookings", {
@@ -489,6 +532,43 @@ function blackoutCovering(
 ): Doc<"driverBlackouts"> | null {
   for (const b of blackouts) {
     if (ts >= b.startAt && ts < b.endAt) return b;
+  }
+  return null;
+}
+
+/**
+ * Returns an existing scheduled booking whose slot overlaps the
+ * proposed pickup time, or null if the slot is free. "Slot" is the
+ * driver's configured slotMinutes (defaults to 30) so two scheduled
+ * rides can't be closer together than that. Cancelled / declined /
+ * no_show / completed rows don't count.
+ *
+ * Exported (via `bookings.findScheduledConflict`) so the recurring
+ * materializer can use the same rule when creating weekly occurrences.
+ */
+export async function findScheduledConflict(
+  ctx: QueryCtx,
+  scheduledFor: number,
+  slotMinutes: number,
+  excludeBookingId?: Doc<"bookings">["_id"],
+): Promise<Doc<"bookings"> | null> {
+  const windowMs = Math.max(1, slotMinutes) * 60 * 1000;
+  const proposedEnd = scheduledFor + windowMs;
+  const all = await ctx.db.query("bookings").collect();
+  for (const b of all) {
+    if (b._id === excludeBookingId) continue;
+    if (b.scheduledFor === undefined) continue;
+    if (
+      ["cancelled", "declined", "no_show", "completed"].includes(b.status)
+    ) {
+      continue;
+    }
+    const bStart = b.scheduledFor;
+    const bEnd = bStart + windowMs;
+    // Half-open interval overlap test: [a, b) and [c, d) overlap iff a < d AND c < b
+    if (scheduledFor < bEnd && bStart < proposedEnd) {
+      return b;
+    }
   }
   return null;
 }
