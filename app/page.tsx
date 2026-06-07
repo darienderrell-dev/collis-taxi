@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import {
   Authenticated,
   Unauthenticated,
@@ -85,7 +85,17 @@ function SignedIn() {
 function ClientHome({ me }: { me: Doc<"users"> }) {
   const myActive = useQuery(api.bookings.myActiveBooking);
   const myTrips = useQuery(api.bookings.listMine);
+  const cancelBooking = useMutation(api.bookings.cancelByClient);
   const { signOut } = useAuthActions();
+
+  async function quickCancel(id: Doc<"bookings">["_id"]) {
+    if (!confirm("Cancel this ride?")) return;
+    try {
+      await cancelBooking({ id });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Couldn't cancel");
+    }
+  }
   return (
     <>
       <div className="flex items-center justify-between mb-6 -mt-2">
@@ -111,20 +121,37 @@ function ClientHome({ me }: { me: Doc<"users"> }) {
       <StatusBanner />
 
       {myActive ? (
-        <Link
-          href={`/trips/${myActive._id}`}
-          className="mt-4 block w-full p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200"
-        >
-          <div className="text-xs uppercase tracking-wider text-emerald-300">
-            You have an active booking
+        <div className="mt-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 overflow-hidden">
+          <div className="p-4">
+            <div className="text-xs uppercase tracking-wider text-emerald-300">
+              You have an active ride
+            </div>
+            <div className="text-base font-semibold mt-1 text-emerald-100">
+              {myActive.pickupZone} → {myActive.dropoffZone}
+            </div>
+            <div className="text-xs opacity-80 mt-0.5 capitalize text-emerald-200">
+              {myActive.status.replace(/_/g, " ")}
+            </div>
           </div>
-          <div className="text-sm font-medium mt-0.5">
-            {myActive.pickupZone} → {myActive.dropoffZone}
+          {/* Action row — explicit, big touch targets so older users can see
+              exactly what they can do without hunting. */}
+          <div className="flex border-t border-emerald-500/30">
+            <Link
+              href={`/trips/${myActive._id}`}
+              className="flex-1 py-3 text-center text-emerald-50 font-semibold text-sm bg-emerald-500/20 hover:bg-emerald-500/30"
+            >
+              View ride →
+            </Link>
+            {!["arrived", "in_progress"].includes(myActive.status) && (
+              <button
+                onClick={() => quickCancel(myActive._id)}
+                className="flex-1 py-3 text-center text-rose-200 font-semibold text-sm border-l border-emerald-500/30 hover:bg-rose-500/10"
+              >
+                Cancel ride
+              </button>
+            )}
           </div>
-          <div className="text-xs opacity-80 mt-0.5 capitalize">
-            {myActive.status.replace(/_/g, " ")} • tap to track
-          </div>
-        </Link>
+        </div>
       ) : (
         <Link
           href="/book"
