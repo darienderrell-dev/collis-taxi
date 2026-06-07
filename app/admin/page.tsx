@@ -119,6 +119,7 @@ function ReportsPanel() {
   // top always show today/week/month no matter what — they're the "at a
   // glance" numbers and shouldn't move when she filters the list.
   const [window, setWindow] = useState<"today" | "week" | "month">("today");
+  const [unpaidOnly, setUnpaidOnly] = useState(false);
 
   // Memoise so the queries don't refetch on every render.
   const ranges = useMemo(() => buildRanges(), []);
@@ -131,6 +132,15 @@ function ReportsPanel() {
     window === "today" ? ranges.today : window === "week" ? ranges.week : ranges.month;
   const trips = useQuery(api.bookings.listForRange, listRange);
 
+  // Outstanding balance for the selected window — drives the unpaid tile.
+  const unpaidCompleted = (trips ?? []).filter(
+    (b) => b.status === "completed" && !b.paidAt,
+  );
+  const unpaidAmount = unpaidCompleted.reduce((s, b) => s + b.price, 0);
+  const filteredTrips = unpaidOnly
+    ? (trips ?? []).filter((b) => b.status === "completed" && !b.paidAt)
+    : trips;
+
   return (
     <>
       <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -138,6 +148,34 @@ function ReportsPanel() {
         <SummaryTile label="This week" data={week} accent="emerald" />
         <SummaryTile label="This month" data={month} accent="sky" />
       </section>
+
+      {unpaidCompleted.length > 0 && (
+        <div className="mt-3 rounded-2xl bg-rose-500/10 border border-rose-500/30 p-3 flex items-center justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-wider text-rose-300">
+              Outstanding ({window === "week" ? "this week" : window === "month" ? "this month" : "today"})
+            </div>
+            <div className="text-xl font-bold text-rose-100 mt-0.5">
+              {fmtMoney(unpaidAmount)}
+            </div>
+            <div className="text-[11px] text-rose-300/80">
+              {unpaidCompleted.length} unpaid trip
+              {unpaidCompleted.length === 1 ? "" : "s"}
+            </div>
+          </div>
+          <button
+            onClick={() => setUnpaidOnly((v) => !v)}
+            className={
+              "text-xs font-semibold rounded-lg px-3 py-2 border " +
+              (unpaidOnly
+                ? "bg-rose-500 text-slate-950 border-rose-500"
+                : "bg-rose-500/15 text-rose-200 border-rose-500/40")
+            }
+          >
+            {unpaidOnly ? "✓ Showing unpaid" : "Show unpaid only"}
+          </button>
+        </div>
+      )}
 
       <section className="mt-6 rounded-2xl bg-slate-900 border border-slate-800 p-4">
         <div className="flex items-center justify-between mb-3">
@@ -158,17 +196,17 @@ function ReportsPanel() {
           </div>
         </div>
 
-        {trips === undefined && (
+        {filteredTrips === undefined && (
           <div className="text-sm text-slate-500 py-6 text-center">Loading…</div>
         )}
-        {trips && trips.length === 0 && (
+        {filteredTrips && filteredTrips.length === 0 && (
           <div className="text-sm text-slate-500 py-6 text-center">
-            No trips in this window.
+            {unpaidOnly ? "No unpaid trips in this window." : "No trips in this window."}
           </div>
         )}
-        {trips && trips.length > 0 && (
+        {filteredTrips && filteredTrips.length > 0 && (
           <div className="space-y-2">
-            {trips.map((b) => (
+            {filteredTrips.map((b) => (
               <TripRow key={b._id} booking={b} />
             ))}
           </div>
@@ -237,6 +275,7 @@ function TripRow({
   const t = booking.scheduledFor ?? booking._creationTime;
   const isCompleted = booking.status === "completed";
   const isLost = ["cancelled", "declined", "no_show"].includes(booking.status);
+  const isPaid = !!booking.paidAt;
   return (
     <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
       <div className="flex items-center justify-between gap-2">
@@ -273,9 +312,23 @@ function TripRow({
           {fmtMoney(booking.price)}
         </div>
       </div>
-      <div className="text-[11px] text-slate-500 mt-0.5">
-        {booking.scheduledFor ? "Scheduled · " : ""}
-        {fmtDateTime(t)}
+      <div className="flex items-center justify-between mt-0.5">
+        <div className="text-[11px] text-slate-500">
+          {booking.scheduledFor ? "Scheduled · " : ""}
+          {fmtDateTime(t)}
+        </div>
+        {isCompleted && (
+          <span
+            className={
+              "text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 border " +
+              (isPaid
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200"
+                : "bg-rose-500/10 border-rose-500/40 text-rose-200")
+            }
+          >
+            {isPaid ? "✓ Paid" : "Unpaid"}
+          </span>
+        )}
       </div>
     </div>
   );

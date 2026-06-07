@@ -391,6 +391,39 @@ export const availabilityNow = query({
   },
 });
 
+/**
+ * Driver marks cash collected on a booking. Independent of status so
+ * Collis can mark a completed trip paid the next day if he didn't get
+ * the cash at dropoff.
+ */
+export const markPaid = mutation({
+  args: { id: v.id("bookings") },
+  handler: async (ctx, { id }) => {
+    await requireStaff(ctx);
+    const booking = await ctx.db.get(id);
+    if (!booking) throw new Error("Booking not found");
+    await ctx.db.patch(id, { paidAt: Date.now() });
+    await ctx.db.insert("bookingEvents", {
+      bookingId: id,
+      label: "Marked paid",
+    });
+  },
+});
+
+export const markUnpaid = mutation({
+  args: { id: v.id("bookings") },
+  handler: async (ctx, { id }) => {
+    await requireStaff(ctx);
+    const booking = await ctx.db.get(id);
+    if (!booking) throw new Error("Booking not found");
+    await ctx.db.patch(id, { paidAt: undefined });
+    await ctx.db.insert("bookingEvents", {
+      bookingId: id,
+      label: "Unmarked paid",
+    });
+  },
+});
+
 // ---------- background jobs ----------
 
 /**

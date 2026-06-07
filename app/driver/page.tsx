@@ -124,6 +124,8 @@ function DriverDashboard() {
   const accept = useMutation(api.bookings.driverAccept);
   const decline = useMutation(api.bookings.driverDecline);
   const transition = useMutation(api.bookings.driverTransition);
+  const markPaid = useMutation(api.bookings.markPaid);
+  const markUnpaid = useMutation(api.bookings.markUnpaid);
   const updateConfig = useMutation(api.driverConfig.update);
   const { signOut } = useAuthActions();
 
@@ -193,6 +195,11 @@ function DriverDashboard() {
         <ActiveTripCard
           booking={active}
           onAdvance={(to) => transition({ id: active._id, to })}
+          onTogglePaid={() =>
+            active.paidAt
+              ? markUnpaid({ id: active._id })
+              : markPaid({ id: active._id })
+          }
         />
       )}
 
@@ -244,6 +251,8 @@ function DriverDashboard() {
  */
 function PastTripsCard() {
   const [window, setWindow] = useState<"today" | "week" | "month">("today");
+  const markPaid = useMutation(api.bookings.markPaid);
+  const markUnpaid = useMutation(api.bookings.markUnpaid);
   // Memoise the timestamp ranges so the query args are stable across renders.
   const ranges = useMemo(() => buildDriverRanges(), []);
   const range =
@@ -254,10 +263,13 @@ function PastTripsCard() {
   const past = (trips ?? []).filter((t) =>
     ["completed", "cancelled", "declined", "no_show"].includes(t.status),
   );
-  const earned = past
-    .filter((t) => t.status === "completed")
+  const completed = past.filter((t) => t.status === "completed");
+  const earned = completed.reduce((s, t) => s + t.price, 0);
+  const doneCount = completed.length;
+  const unpaidCount = completed.filter((t) => !t.paidAt).length;
+  const unpaidAmount = completed
+    .filter((t) => !t.paidAt)
     .reduce((s, t) => s + t.price, 0);
-  const doneCount = past.filter((t) => t.status === "completed").length;
 
   return (
     <div className="mt-6 rounded-2xl bg-slate-900 border border-slate-800 p-4">
@@ -293,13 +305,41 @@ function PastTripsCard() {
               <div className="text-xl font-bold text-emerald-200 mt-0.5">
                 {fmtMoney(earned)}
               </div>
-            </div>
-            <div className="rounded-xl bg-slate-950 border border-slate-800 p-3">
-              <div className="text-[10px] uppercase tracking-wider text-slate-400">
-                Trips done
+              <div className="text-[10px] text-emerald-300/70 mt-0.5">
+                {doneCount} trip{doneCount === 1 ? "" : "s"}
               </div>
-              <div className="text-xl font-bold text-slate-100 mt-0.5">
-                {doneCount}
+            </div>
+            <div
+              className={
+                "rounded-xl border p-3 " +
+                (unpaidCount > 0
+                  ? "bg-rose-500/10 border-rose-500/30"
+                  : "bg-slate-950 border-slate-800")
+              }
+            >
+              <div
+                className={
+                  "text-[10px] uppercase tracking-wider " +
+                  (unpaidCount > 0 ? "text-rose-300" : "text-slate-400")
+                }
+              >
+                Unpaid
+              </div>
+              <div
+                className={
+                  "text-xl font-bold mt-0.5 " +
+                  (unpaidCount > 0 ? "text-rose-200" : "text-slate-100")
+                }
+              >
+                {fmtMoney(unpaidAmount)}
+              </div>
+              <div
+                className={
+                  "text-[10px] mt-0.5 " +
+                  (unpaidCount > 0 ? "text-rose-300/70" : "text-slate-500")
+                }
+              >
+                {unpaidCount} trip{unpaidCount === 1 ? "" : "s"}
               </div>
             </div>
           </div>
@@ -315,6 +355,8 @@ function PastTripsCard() {
                 const isLost = ["cancelled", "declined", "no_show"].includes(
                   b.status,
                 );
+                const isPaid = !!b.paidAt;
+                const completedTrip = b.status === "completed";
                 return (
                   <div
                     key={b._id}
@@ -348,8 +390,27 @@ function PastTripsCard() {
                         {fmtMoney(b.price)}
                       </div>
                     </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">
-                      {fmtDateTime(t)}
+                    <div className="flex items-center justify-between mt-1">
+                      <div className="text-[10px] text-slate-500">
+                        {fmtDateTime(t)}
+                      </div>
+                      {completedTrip && (
+                        <button
+                          onClick={() =>
+                            isPaid
+                              ? markUnpaid({ id: b._id })
+                              : markPaid({ id: b._id })
+                          }
+                          className={
+                            "text-[10px] uppercase tracking-wider rounded-full px-2 py-0.5 border " +
+                            (isPaid
+                              ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200"
+                              : "bg-rose-500/10 border-rose-500/40 text-rose-200")
+                          }
+                        >
+                          {isPaid ? "✓ Paid" : "Unpaid"}
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -557,11 +618,13 @@ function RequestCard({
 function ActiveTripCard({
   booking,
   onAdvance,
+  onTogglePaid,
 }: {
   booking: BookingForDriver;
   onAdvance: (
     to: "on_the_way" | "arrived" | "in_progress" | "completed" | "no_show",
   ) => void;
+  onTogglePaid: () => void;
 }) {
   const buttons: { label: string; cls: string; to: Parameters<typeof onAdvance>[0] }[] = [];
   if (booking.status === "on_the_way") {
@@ -631,6 +694,22 @@ function ActiveTripCard({
           </button>
         ))}
       </div>
+      {/* Cash collection toggle — visible from in_progress onward so
+          Collis can confirm payment at dropoff. Stays on the card after
+          completion until he advances to a new trip. */}
+      {["in_progress", "completed"].includes(booking.status) && (
+        <button
+          onClick={onTogglePaid}
+          className={
+            "mt-2 w-full py-2 rounded-xl text-sm font-semibold border " +
+            (booking.paidAt
+              ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200"
+              : "bg-slate-950 border-slate-700 text-slate-200")
+          }
+        >
+          {booking.paidAt ? "✓ Paid (tap to undo)" : "Mark cash collected"}
+        </button>
+      )}
     </div>
   );
 }

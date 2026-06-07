@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import {
   Authenticated,
   AuthLoading,
@@ -10,6 +10,7 @@ import {
   useQuery,
 } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 
 export default function DriverSettingsPage() {
   return (
@@ -60,6 +61,7 @@ function SettingsForm({
     driverPhone?: string;
     vehicle?: string;
     plate?: string;
+    driverPhotoUrl?: string;
     workDays: number[];
     workHoursStart: string;
     workHoursEnd: string;
@@ -151,6 +153,7 @@ function SettingsForm({
 
       <section className="rounded-2xl bg-slate-900 border border-slate-800 p-4 space-y-3">
         <div className="text-sm font-medium">Profile (shown to clients)</div>
+        <PhotoPicker currentUrl={config.driverPhotoUrl} />
         <Field label="Name" value={driverName} onChange={setDriverName} />
         <Field
           label="Phone"
@@ -311,6 +314,100 @@ function SettingsForm({
         )}
       </section>
     </>
+  );
+}
+
+/**
+ * Photo uploader for the driver's profile picture. Uses Convex storage
+ * via a two-step flow: generateUploadUrl → POST file → setPhoto with
+ * the returned storageId. Shows current photo (or fallback emoji) and
+ * a Choose photo button so older users don't have to drag-drop.
+ */
+function PhotoPicker({ currentUrl }: { currentUrl?: string }) {
+  const generateUploadUrl = useMutation(api.driverConfig.generateUploadUrl);
+  const setPhoto = useMutation(api.driverConfig.setPhoto);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function handleFile(file: File) {
+    setErr(null);
+    if (!file.type.startsWith("image/")) {
+      setErr("Please pick an image file.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErr("Photo too big — keep it under 5 MB.");
+      return;
+    }
+    setUploading(true);
+    try {
+      const url = await generateUploadUrl();
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": file.type },
+        body: file,
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      const { storageId } = (await res.json()) as { storageId: Id<"_storage"> };
+      await setPhoto({ storageId });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">
+        Photo
+      </div>
+      <div className="flex items-center gap-3">
+        <div className="w-16 h-16 rounded-full bg-slate-800 overflow-hidden flex items-center justify-center shrink-0">
+          {currentUrl ? (
+            // Browser-only preview, no Next/Image since src is a remote URL.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={currentUrl}
+              alt="Driver"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <span className="text-3xl">👨‍✈️</span>
+          )}
+        </div>
+        <div className="flex-1">
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+            className="bg-slate-800 border border-slate-700 text-slate-200 text-sm rounded-lg px-3 py-2 disabled:opacity-50"
+          >
+            {uploading
+              ? "Uploading…"
+              : currentUrl
+              ? "Change photo"
+              : "Choose photo"}
+          </button>
+          <div className="text-[11px] text-slate-500 mt-1">
+            Shown to passengers when they book.
+          </div>
+        </div>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleFile(f);
+        }}
+      />
+      {err && <div className="text-xs text-rose-400 mt-2">{err}</div>}
+    </div>
   );
 }
 

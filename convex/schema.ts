@@ -70,7 +70,11 @@ export default defineSchema({
     slotMinutes: v.number(),
     driverName: v.string(),
     driverPhone: v.optional(v.string()),
+    // Legacy pasted-URL field, kept for backward compatibility.
     driverPhotoUrl: v.optional(v.string()),
+    // New: uploaded photo via Convex storage. driverConfig.get resolves
+    // this to a URL when present, falling back to driverPhotoUrl.
+    driverPhotoStorageId: v.optional(v.id("_storage")),
     vehicle: v.optional(v.string()),
     plate: v.optional(v.string()),
   }),
@@ -91,6 +95,10 @@ export default defineSchema({
     notes: v.optional(v.string()),
     status: bookingStatus,
     price: v.number(),
+    // Cash collected: timestamp Collis tapped "Mark paid", undefined = unpaid.
+    // Separate from status so we can mark a completed trip paid later
+    // (he sometimes gets paid the next day).
+    paidAt: v.optional(v.number()),
   })
     .index("by_client", ["clientUserId"])
     .index("by_status", ["status"])

@@ -5,7 +5,50 @@ import { requireStaff } from "./users";
 export const get = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("driverConfig").first();
+    const row = await ctx.db.query("driverConfig").first();
+    if (!row) return null;
+    // Resolve uploaded photo (storage) to a URL, falling back to the
+    // legacy pasted-URL field. Callers shouldn't have to care which
+    // path the photo came from.
+    let photoUrl: string | null = row.driverPhotoUrl ?? null;
+    if (row.driverPhotoStorageId) {
+      const resolved = await ctx.storage.getUrl(row.driverPhotoStorageId);
+      if (resolved) photoUrl = resolved;
+    }
+    return { ...row, driverPhotoUrl: photoUrl ?? undefined };
+  },
+});
+
+/**
+ * Generates a one-time URL the driver settings page POSTs the photo to.
+ * Convex returns a storageId, which we then save via setPhoto.
+ */
+export const generateUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireStaff(ctx);
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+/**
+ * Save the uploaded photo's storageId on driverConfig (and clear the
+ * legacy URL so the storage path wins). Old storage objects from
+ * previous uploads are deleted so we don't pay for orphans.
+ */
+export const setPhoto = mutation({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, { storageId }) => {
+    await requireStaff(ctx);
+    const row = await ctx.db.query("driverConfig").first();
+    if (!row) throw new Error("driverConfig not seeded yet");
+    if (row.driverPhotoStorageId && row.driverPhotoStorageId !== storageId) {
+      await ctx.storage.delete(row.driverPhotoStorageId);
+    }
+    await ctx.db.patch(row._id, {
+      driverPhotoStorageId: storageId,
+      driverPhotoUrl: undefined,
+    });
   },
 });
 
