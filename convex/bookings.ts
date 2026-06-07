@@ -201,6 +201,65 @@ export const listForRange = query({
   },
 });
 
+/**
+ * One row per client who has ever booked. Aggregates trip counts and
+ * spend so admin can see who the regulars are, sort by frequency, and
+ * call/text them directly. Sorted by total trips descending.
+ */
+export const clientsSummary = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireStaff(ctx);
+    const all = await ctx.db.query("bookings").collect();
+
+    // Group bookings by clientUserId in a single pass.
+    type Agg = {
+      userId: Doc<"users">["_id"];
+      totalTrips: number;
+      completedTrips: number;
+      cancelledTrips: number;
+      totalSpent: number;
+      lastTripAt: number;
+    };
+    const byClient = new Map<string, Agg>();
+    for (const b of all) {
+      const key = b.clientUserId as unknown as string;
+      const agg = byClient.get(key) ?? {
+        userId: b.clientUserId,
+        totalTrips: 0,
+        completedTrips: 0,
+        cancelledTrips: 0,
+        totalSpent: 0,
+        lastTripAt: 0,
+      };
+      agg.totalTrips++;
+      if (b.status === "completed") {
+        agg.completedTrips++;
+        agg.totalSpent += b.price;
+      } else if (["cancelled", "declined", "no_show"].includes(b.status)) {
+        agg.cancelledTrips++;
+      }
+      const t = b.scheduledFor ?? b._creationTime;
+      if (t > agg.lastTripAt) agg.lastTripAt = t;
+      byClient.set(key, agg);
+    }
+
+    // Resolve user records in parallel so we get name + phone for each row.
+    const rows = await Promise.all(
+      Array.from(byClient.values()).map(async (agg) => {
+        const u = await ctx.db.get(agg.userId);
+        return {
+          ...agg,
+          name: u?.name,
+          phone: u?.phone,
+        };
+      }),
+    );
+    rows.sort((a, b) => b.totalTrips - a.totalTrips);
+    return rows;
+  },
+});
+
 export const eventsForBooking = query({
   args: { bookingId: v.id("bookings") },
   handler: async (ctx, { bookingId }) => {

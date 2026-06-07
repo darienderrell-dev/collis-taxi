@@ -623,17 +623,136 @@ function BookingsPanel() {
 }
 
 // ============================================================
-// Clients
+// Clients — Everyone who's ever booked, with trip counts and spend.
+// Sorted by frequency so Gale can see her regulars at a glance, with
+// search to find a specific name/number quickly.
 // ============================================================
 function ClientsPanel() {
-  // Reuse listAll; we'd add a users-list query later if needed.
-  // For now, derive distinct clients from bookings as a v1 approach.
-  const rows = useQuery(api.bookings.listAll);
-  if (!rows) return <div className="text-sm text-slate-500">Loading…</div>;
+  const rows = useQuery(api.bookings.clientsSummary);
+  const [search, setSearch] = useState("");
+
+  if (rows === undefined)
+    return <div className="text-sm text-slate-500">Loading…</div>;
+  if (rows.length === 0)
+    return (
+      <div className="text-sm text-slate-500 bg-slate-900 border border-slate-800 rounded-xl p-4">
+        No clients yet — they show up here after their first booking.
+      </div>
+    );
+
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? rows.filter(
+        (r) =>
+          (r.name ?? "").toLowerCase().includes(q) ||
+          (r.phone ?? "").toLowerCase().includes(q),
+      )
+    : rows;
+
+  // "Regulars" = at least 5 trips. Shown as a badge.
+  const regularThreshold = 5;
+  // Lifetime totals across all clients shown.
+  const totalRevenue = rows.reduce((s, r) => s + r.totalSpent, 0);
+  const totalTrips = rows.reduce((s, r) => s + r.completedTrips, 0);
+
   return (
-    <div className="text-sm text-slate-400">
-      v1 admin shows clients via bookings. A dedicated users listing query lands
-      in v1.1 — for now the bookings list above identifies who's active.
-    </div>
+    <>
+      <section className="grid grid-cols-3 gap-3 mb-4">
+        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3">
+          <div className="text-xs text-slate-400">Clients</div>
+          <div className="text-2xl font-bold mt-1">{rows.length}</div>
+        </div>
+        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3">
+          <div className="text-xs text-slate-400">Lifetime trips</div>
+          <div className="text-2xl font-bold mt-1">{totalTrips}</div>
+        </div>
+        <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3">
+          <div className="text-xs text-slate-400">Lifetime revenue</div>
+          <div className="text-2xl font-bold mt-1 text-amber-300">
+            {fmtMoney(totalRevenue)}
+          </div>
+        </div>
+      </section>
+
+      <input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="🔍 Find a client (name or phone)"
+        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-base mb-4 focus:outline-none focus:border-amber-500"
+      />
+
+      {filtered.length === 0 && (
+        <div className="text-sm text-slate-500 bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+          No clients match &ldquo;{search}&rdquo;.
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {filtered.map((r) => {
+          const safe = r.phone?.replace(/[^\d+]/g, "") ?? "";
+          const isRegular = r.totalTrips >= regularThreshold;
+          return (
+            <div
+              key={r.userId}
+              className="p-3 rounded-2xl bg-slate-900 border border-slate-800"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <div className="text-base font-semibold truncate">
+                      {r.name ?? "Unnamed client"}
+                    </div>
+                    {isRegular && (
+                      <span className="text-[10px] uppercase tracking-wider bg-amber-500/20 text-amber-200 border border-amber-500/30 rounded-full px-1.5 py-0.5">
+                        ⭐ Regular
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-slate-400 truncate">
+                    {r.phone ?? "No phone on file"}
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-base font-bold text-amber-300">
+                    {fmtMoney(r.totalSpent)}
+                  </div>
+                  <div className="text-[11px] text-slate-500">lifetime</div>
+                </div>
+              </div>
+
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <div className="text-slate-300">
+                  <span className="font-semibold">{r.totalTrips}</span> trips
+                  <span className="text-slate-500">
+                    {" "}· {r.completedTrips} done
+                    {r.cancelledTrips > 0 && `, ${r.cancelledTrips} cancelled`}
+                  </span>
+                </div>
+                <div className="text-slate-500">
+                  Last: {fmtDateTime(r.lastTripAt)}
+                </div>
+              </div>
+
+              {safe && (
+                <div className="mt-2 flex gap-2">
+                  <a
+                    href={"tel:" + safe}
+                    className="flex-1 text-center bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-sm font-semibold rounded-lg py-2"
+                  >
+                    📞 Call
+                  </a>
+                  <a
+                    href={"sms:" + safe}
+                    className="flex-1 text-center bg-sky-500/15 border border-sky-500/30 text-sky-200 text-sm font-semibold rounded-lg py-2"
+                  >
+                    💬 Text
+                  </a>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
