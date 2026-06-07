@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -388,6 +388,40 @@ export const availabilityNow = query({
       };
     }
     return { state: "available" as const };
+  },
+});
+
+// ---------- background jobs ----------
+
+/**
+ * Auto-decline ASAP requests Collis didn't respond to within 30 minutes.
+ * Without this, missed bookings sit on the dashboard forever and pollute
+ * the queue logic. Scheduled rides are left alone — they're meant to
+ * wait until their pickup time.
+ *
+ * Wired in convex/crons.ts to run every 5 minutes.
+ */
+export const expireStaleRequests = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = Date.now() - 30 * 60 * 1000; // 30 min
+    const reqs = await ctx.db
+      .query("bookings")
+      .withIndex("by_status", (q) => q.eq("status", "requested"))
+      .collect();
+    let expired = 0;
+    for (const b of reqs) {
+      // Only ASAP rows expire. Scheduled rides wait until their time.
+      if (b.scheduledFor !== undefined) continue;
+      if (b._creationTime >= cutoff) continue;
+      await ctx.db.patch(b._id, { status: "declined" });
+      await ctx.db.insert("bookingEvents", {
+        bookingId: b._id,
+        label: "Auto-expired (no response in 30 min)",
+      });
+      expired++;
+    }
+    return { expired };
   },
 });
 

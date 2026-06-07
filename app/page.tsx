@@ -10,6 +10,7 @@ import {
   AuthLoading,
 } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
+import * as Sentry from "@sentry/nextjs";
 import { api } from "@/convex/_generated/api";
 import { StatusBanner } from "@/components/StatusBanner";
 import { fmtMoney, relTime } from "@/lib/fmt";
@@ -93,6 +94,10 @@ function ClientHome({ me }: { me: Doc<"users"> }) {
     try {
       await cancelBooking({ id });
     } catch (e) {
+      Sentry.captureException(e, {
+        tags: { feature: "booking.cancel" },
+        extra: { bookingId: id },
+      });
       alert(e instanceof Error ? e.message : "Couldn't cancel");
     }
   }

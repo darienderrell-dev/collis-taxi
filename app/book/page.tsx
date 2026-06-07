@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useMemo, Suspense } from "react";
+import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, Authenticated, AuthLoading, Unauthenticated } from "convex/react";
+import * as Sentry from "@sentry/nextjs";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { ZonePicker } from "@/components/ZonePicker";
@@ -141,6 +142,12 @@ function BookingForm() {
       });
       router.push(`/trips/${newId}`);
     } catch (e: unknown) {
+      // Report to Sentry so we hear about production bugs.
+      // The message still surfaces to the user via setErr below.
+      Sentry.captureException(e, {
+        tags: { feature: "booking.create" },
+        extra: { pickupName, dropoffName, when, scheduledAt },
+      });
       setErr(e instanceof Error ? e.message : "Booking failed");
       setSubmitting(false);
     }
@@ -297,12 +304,27 @@ function BookingForm() {
               type="datetime-local"
               value={scheduledAt}
               onChange={(e) => setScheduledAt(e.target.value)}
+              onBlur={(e) => {
+                // Snap to the nearest configured slot boundary so the
+                // pickup time lines up with how Collis batches his day.
+                // Server enforces the same after submit.
+                const slot = driverConfig?.slotMinutes ?? 30;
+                const snapped = snapToSlot(e.target.value, slot);
+                if (snapped && snapped !== e.target.value) {
+                  setScheduledAt(snapped);
+                }
+              }}
               className="mt-2 w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
             />
           )}
           {when === "scheduled" && scheduledAt && (
             <div className="text-xs text-slate-400 mt-1">
               Pickup at {fmtClock(new Date(scheduledAt).getTime())}
+              {driverConfig?.slotMinutes && (
+                <span className="text-slate-500">
+                  {" "}· rounded to {driverConfig.slotMinutes}-min slots
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -342,6 +364,35 @@ function BookingForm() {
         </div>
       </form>
     </>
+  );
+}
+
+/**
+ * Snap a "YYYY-MM-DDTHH:MM" datetime-local value to the nearest slot
+ * boundary. Returns "" if the input is empty/invalid.
+ *
+ * Examples (slot=30): "14:07" → "14:00", "14:23" → "14:30".
+ */
+function snapToSlot(value: string, slotMinutes: number): string {
+  if (!value || slotMinutes <= 0) return value;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value;
+  const totalMin = d.getHours() * 60 + d.getMinutes();
+  const snapped = Math.round(totalMin / slotMinutes) * slotMinutes;
+  d.setHours(0, 0, 0, 0);
+  d.setMinutes(snapped);
+  // Re-format as datetime-local string (yyyy-MM-ddTHH:mm) in local time.
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    d.getFullYear() +
+    "-" +
+    pad(d.getMonth() + 1) +
+    "-" +
+    pad(d.getDate()) +
+    "T" +
+    pad(d.getHours()) +
+    ":" +
+    pad(d.getMinutes())
   );
 }
 

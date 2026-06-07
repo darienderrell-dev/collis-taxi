@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   useMutation,
   useQuery,
@@ -126,6 +126,20 @@ function DriverDashboard() {
   const transition = useMutation(api.bookings.driverTransition);
   const updateConfig = useMutation(api.driverConfig.update);
   const { signOut } = useAuthActions();
+
+  // Audible alert when a new request lands. Without this, Collis won't
+  // hear bookings unless he's staring at the screen. Browsers block
+  // audio before any user gesture, so the first beep may be silent — by
+  // then the driver has interacted with the page and subsequent beeps
+  // will play.
+  const requestCount = requests?.length ?? 0;
+  const prevCountRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevCountRef.current !== null && requestCount > prevCountRef.current) {
+      playRequestChime();
+    }
+    prevCountRef.current = requestCount;
+  }, [requestCount]);
 
   if (me === undefined) return <div className="text-sm text-slate-500">Loading…</div>;
   if (!me) return null;
@@ -346,6 +360,47 @@ function PastTripsCard() {
       )}
     </div>
   );
+}
+
+/**
+ * Two-tone chime using the Web Audio API — no audio file needed, no
+ * service worker, no permission prompt. Plays a quick 880Hz → 1320Hz
+ * envelope (~600ms) when a new request lands so Collis hears it even
+ * if his phone is on his dashboard. Silent on browsers that gate audio
+ * until first user interaction (acceptable: any first interaction
+ * unlocks it).
+ */
+function playRequestChime() {
+  try {
+    const Ctor =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    if (!Ctor) return;
+    const ctx = new Ctor();
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.0, now);
+    gain.gain.linearRampToValueAtTime(0.25, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+
+    const o1 = ctx.createOscillator();
+    o1.type = "sine";
+    o1.frequency.setValueAtTime(880, now);
+    o1.connect(gain);
+    o1.start(now);
+    o1.stop(now + 0.25);
+
+    const o2 = ctx.createOscillator();
+    o2.type = "sine";
+    o2.frequency.setValueAtTime(1320, now + 0.18);
+    o2.connect(gain);
+    o2.start(now + 0.18);
+    o2.stop(now + 0.7);
+  } catch {
+    // Audio blocked or unsupported — no-op.
+  }
 }
 
 /**
