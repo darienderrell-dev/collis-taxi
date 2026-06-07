@@ -14,10 +14,20 @@ import { requireStaff, requireUserId } from "./users";
  */
 async function attachClient(ctx: QueryCtx, booking: Doc<"bookings">) {
   const client = await ctx.db.get(booking.clientUserId);
+  // Lifetime completed trip count for this passenger — drives the ⭐ Regular
+  // badge on driver cards so Collis can recognize his repeat customers.
+  const clientTrips = await ctx.db
+    .query("bookings")
+    .withIndex("by_client", (q) => q.eq("clientUserId", booking.clientUserId))
+    .collect();
+  const completedCount = clientTrips.filter(
+    (b) => b.status === "completed",
+  ).length;
   return {
     ...booking,
     clientName: client?.name,
     clientPhone: client?.phone,
+    clientCompletedCount: completedCount,
   };
 }
 
@@ -292,6 +302,42 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const userId = await requireUserId(ctx);
+
+    // ----- Working-hours + blackout enforcement -----
+    // The driver/settings page promises clients can only book during work
+    // hours and outside blackouts. Enforce that here instead of trusting
+    // the client UI to do it.
+    const config = await ctx.db.query("driverConfig").first();
+    if (config) {
+      const tripTime = args.scheduledFor ?? Date.now();
+
+      // ASAP only: if Collis has flipped to "off" manually, block.
+      if (!args.scheduledFor && config.availability === "off") {
+        throw new Error(
+          "Collis is off right now. Tap Schedule to book for later.",
+        );
+      }
+
+      if (!isWithinWorkingHours(tripTime, config)) {
+        throw new Error(
+          args.scheduledFor
+            ? `That time is outside Collis's working hours (${config.workHoursStart}–${config.workHoursEnd}).`
+            : `Collis is outside working hours right now (${config.workHoursStart}–${config.workHoursEnd}). Tap Schedule to book for later.`,
+        );
+      }
+
+      const blackouts = await ctx.db.query("driverBlackouts").collect();
+      const hit = blackoutCovering(tripTime, blackouts);
+      if (hit) {
+        const reason = hit.label ? ` (${hit.label})` : "";
+        throw new Error(
+          args.scheduledFor
+            ? `That time is blocked off${reason}. Please pick a different time.`
+            : `Collis is unavailable right now${reason}. Tap Schedule to book for later.`,
+        );
+      }
+    }
+
     const id = await ctx.db.insert("bookings", {
       clientUserId: userId,
       pickupZone: args.pickupZone,
@@ -310,6 +356,75 @@ export const create = mutation({
     return id;
   },
 });
+
+/**
+ * Public read of the driver's "right now" availability — used by the
+ * client StatusBanner so it can surface things like "outside hours",
+ * "blocked until 2pm", "day off" instead of just availability flag.
+ * Computed server-side so the client doesn't need to know the rules.
+ */
+export const availabilityNow = query({
+  args: {},
+  handler: async (ctx) => {
+    const config = await ctx.db.query("driverConfig").first();
+    if (!config) return { state: "unconfigured" as const };
+    if (config.availability === "off")
+      return { state: "off" as const, until: "today" as const };
+    const now = Date.now();
+    if (!isWithinWorkingHours(now, config)) {
+      return {
+        state: "outside_hours" as const,
+        start: config.workHoursStart,
+        end: config.workHoursEnd,
+      };
+    }
+    const blackouts = await ctx.db.query("driverBlackouts").collect();
+    const hit = blackoutCovering(now, blackouts);
+    if (hit) {
+      return {
+        state: "blackout" as const,
+        label: hit.label,
+        endAt: hit.endAt,
+      };
+    }
+    return { state: "available" as const };
+  },
+});
+
+// ---------- availability helpers ----------
+
+/**
+ * True if the given timestamp falls on one of Collis's working days AND
+ * within his configured start–end window. Days are 0=Sun..6=Sat to match
+ * JS Date.getDay() and the settings UI.
+ */
+function isWithinWorkingHours(
+  ts: number,
+  config: Doc<"driverConfig">,
+): boolean {
+  const d = new Date(ts);
+  if (!config.workDays.includes(d.getDay())) return false;
+  const minutes = d.getHours() * 60 + d.getMinutes();
+  const [sh, sm] = config.workHoursStart.split(":").map(Number);
+  const [eh, em] = config.workHoursEnd.split(":").map(Number);
+  const startMin = sh * 60 + sm;
+  const endMin = eh * 60 + em;
+  return minutes >= startMin && minutes < endMin;
+}
+
+/**
+ * Returns the first blackout that contains the given timestamp, or null.
+ * Used for both UI status and the create-booking guard.
+ */
+function blackoutCovering(
+  ts: number,
+  blackouts: Doc<"driverBlackouts">[],
+): Doc<"driverBlackouts"> | null {
+  for (const b of blackouts) {
+    if (ts >= b.startAt && ts < b.endAt) return b;
+  }
+  return null;
+}
 
 export const cancelByClient = mutation({
   args: { id: v.id("bookings") },

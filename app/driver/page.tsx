@@ -22,7 +22,12 @@ import { fmtMoney, fmtDateTime, relTime, countdownLabel } from "@/lib/fmt";
 type BookingForDriver = Doc<"bookings"> & {
   clientName?: string;
   clientPhone?: string;
+  clientCompletedCount?: number;
 };
+
+// Threshold for the ⭐ Regular badge — matches the admin Clients tab so
+// Collis and Gale see "regular" the same way.
+const REGULAR_THRESHOLD = 5;
 
 /**
  * Passenger info strip rendered on every driver-facing booking card.
@@ -32,20 +37,36 @@ type BookingForDriver = Doc<"bookings"> & {
 function PassengerStrip({
   name,
   phone,
+  completedCount,
 }: {
   name?: string;
   phone?: string;
+  completedCount?: number;
 }) {
   const display = name?.trim() || "Passenger";
   // Strip non-digits for tel:/sms: hrefs — keep international/plus characters.
   const safe = phone?.replace(/[^\d+]/g, "") ?? "";
+  const isRegular = (completedCount ?? 0) >= REGULAR_THRESHOLD;
+  const isNew = (completedCount ?? 0) === 0;
   return (
     <div className="mt-3 rounded-xl bg-slate-950/60 border border-slate-800 p-2.5 flex items-center gap-2">
       <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center shrink-0 text-base">
         👤
       </div>
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium truncate">{display}</div>
+        <div className="flex items-center gap-1.5">
+          <div className="text-sm font-medium truncate">{display}</div>
+          {isRegular && (
+            <span className="text-[10px] uppercase tracking-wider bg-amber-500/20 text-amber-200 border border-amber-500/30 rounded-full px-1.5 py-0.5 shrink-0">
+              ⭐ Regular
+            </span>
+          )}
+          {isNew && (
+            <span className="text-[10px] uppercase tracking-wider bg-sky-500/20 text-sky-200 border border-sky-500/30 rounded-full px-1.5 py-0.5 shrink-0">
+              New
+            </span>
+          )}
+        </div>
         <div className="text-xs text-slate-400 truncate">
           {phone ?? "No phone on file"}
         </div>
@@ -79,11 +100,11 @@ export default function DriverPage() {
         </AuthLoading>
         <Unauthenticated>
           <div className="text-sm text-slate-400">
-            Driver/admin sign-in required.{" "}
+            Staff sign-in required.{" "}
             <Link href="/login" className="underline">
               Sign in
-            </Link>{" "}
-            with phone "DRIVER" or "ADMIN".
+            </Link>
+            .
           </div>
         </Unauthenticated>
         <Authenticated>
@@ -113,8 +134,8 @@ function DriverDashboard() {
       <div className="rounded-2xl bg-rose-500/10 border border-rose-500/30 p-5">
         <div className="text-sm font-medium text-rose-200">Not authorized</div>
         <div className="text-xs text-slate-400 mt-1">
-          You're signed in as a client. To use the driver dashboard, sign in
-          with phone "DRIVER".
+          You're signed in as a passenger. Sign out and back in with a staff
+          account to use the driver dashboard.
         </div>
         <Link href="/" className="mt-4 inline-block text-amber-400 underline text-xs">
           Back home
@@ -433,7 +454,11 @@ function RequestCard({
         </div>
         <div className="text-slate-400">{relTime(booking._creationTime)}</div>
       </div>
-      <PassengerStrip name={booking.clientName} phone={booking.clientPhone} />
+      <PassengerStrip
+        name={booking.clientName}
+        phone={booking.clientPhone}
+        completedCount={booking.clientCompletedCount}
+      />
       <div className="mt-3 text-sm">
         <div className="text-slate-200">
           <span className="text-emerald-400">●</span> {booking.pickupZone}
@@ -521,7 +546,11 @@ function ActiveTripCard({
         </div>
         <div className="text-xs text-amber-200">{fmtMoney(booking.price)}</div>
       </div>
-      <PassengerStrip name={booking.clientName} phone={booking.clientPhone} />
+      <PassengerStrip
+        name={booking.clientName}
+        phone={booking.clientPhone}
+        completedCount={booking.clientCompletedCount}
+      />
       <div className="text-sm mt-3 space-y-1">
         <div>
           <span className="text-emerald-400">●</span> {booking.pickupZone}

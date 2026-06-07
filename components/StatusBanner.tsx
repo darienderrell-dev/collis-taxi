@@ -4,49 +4,81 @@ import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 
 /**
- * Tiny "is Collis available right now?" banner shown on the client home.
- * Source of truth is the singleton driverConfig row.
+ * "Is Collis available right now?" banner shown on the client home.
+ * Combines two queries:
+ *   - driverConfig.get for the driver's name + on_job state
+ *   - bookings.availabilityNow for the computed state (work hours,
+ *     work days, blackouts) — the server is the source of truth.
  */
 export function StatusBanner() {
   const config = useQuery(api.driverConfig.get);
+  const now = useQuery(api.bookings.availabilityNow);
 
-  if (config === undefined) {
+  if (config === undefined || now === undefined) {
     return <Card tone="slate" title="Loading status…" sub="" />;
   }
-  if (!config) {
+  if (!config || now.state === "unconfigured") {
     return (
       <Card
         tone="slate"
-        title="Driver not set up"
-        sub="Ask the operator to seed the database."
+        title="Service not set up"
+        sub="Check back soon."
       />
     );
   }
 
-  if (config.availability === "off") {
-    return (
-      <Card
-        tone="slate"
-        title={`${config.driverName} is off today`}
-        sub="You can still schedule a ride for later."
-      />
-    );
-  }
+  const name = config.driverName;
+
+  // Active trip beats other states — "on a trip" is visible info for the
+  // booking flow ("you'll join the queue").
   if (config.availability === "on_job") {
     return (
       <Card
         tone="amber"
         pulse
-        title={`${config.driverName} is on a trip right now`}
+        title={`${name} is on a trip right now`}
         sub="Book now to join the queue, or schedule for later."
       />
     );
   }
+
+  if (now.state === "off") {
+    return (
+      <Card
+        tone="slate"
+        title={`${name} is off today`}
+        sub="You can still schedule a ride for tomorrow."
+      />
+    );
+  }
+  if (now.state === "outside_hours") {
+    return (
+      <Card
+        tone="slate"
+        title={`${name} is off right now`}
+        sub={`Working hours ${now.start} – ${now.end}. Schedule a ride for later.`}
+      />
+    );
+  }
+  if (now.state === "blackout") {
+    const back = new Date(now.endAt).toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    return (
+      <Card
+        tone="amber"
+        title={`${name} is unavailable${now.label ? ` — ${now.label}` : ""}`}
+        sub={`Back at ${back}. You can still schedule a ride.`}
+      />
+    );
+  }
+
   return (
     <Card
       tone="emerald"
       pulse
-      title={`${config.driverName} is available now`}
+      title={`${name} is available now`}
       sub={`Working hours ${config.workHoursStart} – ${config.workHoursEnd}`}
     />
   );

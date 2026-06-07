@@ -26,8 +26,8 @@ export default function AdminPage() {
             Admin sign-in required.{" "}
             <Link href="/login" className="underline">
               Sign in
-            </Link>{" "}
-            with phone "ADMIN".
+            </Link>
+            .
           </div>
         </Unauthenticated>
         <Authenticated>
@@ -47,8 +47,8 @@ function AdminGate() {
       <div className="rounded-2xl bg-rose-500/10 border border-rose-500/30 p-5">
         <div className="text-sm font-medium text-rose-200">Not authorized</div>
         <div className="text-xs text-slate-400 mt-1">
-          You're signed in as {me.role ?? "client"}. To use admin, sign in with
-          phone "ADMIN".
+          You're signed in as {me.role ?? "passenger"}. Sign out and back in
+          with an admin account to use this page.
         </div>
         <Link
           href="/"
@@ -63,11 +63,11 @@ function AdminGate() {
 }
 
 function AdminDashboard({ me }: { me: Doc<"users"> }) {
-  // Reports lands first because that's the daily-ops view Gale opens to
-  // see "how's the business doing today" — pricing changes are rarer.
-  const [tab, setTab] = useState<"reports" | "pricing" | "bookings" | "clients">(
-    "reports",
-  );
+  // Reports lands first — that's the daily-ops view Gale opens to see
+  // "how's the business doing today". Pricing and Clients are less
+  // frequent. The old "bookings" tab was a worse duplicate of Reports
+  // (no date filters, no passenger names) so it's been removed.
+  const [tab, setTab] = useState<"reports" | "pricing" | "clients">("reports");
   const { signOut } = useAuthActions();
   return (
     <>
@@ -87,7 +87,7 @@ function AdminDashboard({ me }: { me: Doc<"users"> }) {
       </div>
 
       <div className="flex gap-1 bg-slate-900 rounded-xl p-1 mb-6">
-        {(["reports", "pricing", "bookings", "clients"] as const).map((t) => (
+        {(["reports", "pricing", "clients"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -103,7 +103,6 @@ function AdminDashboard({ me }: { me: Doc<"users"> }) {
 
       {tab === "reports" && <ReportsPanel />}
       {tab === "pricing" && <PricingPanel />}
-      {tab === "bookings" && <BookingsPanel />}
       {tab === "clients" && <ClientsPanel />}
     </>
   );
@@ -601,26 +600,7 @@ function PriceEditor({
   );
 }
 
-// ============================================================
-// All bookings — full history (Reports is the daily view)
-// ============================================================
-function BookingsPanel() {
-  const rows = useQuery(api.bookings.listAll);
-  if (!rows) return <div className="text-sm text-slate-500">Loading…</div>;
-  if (rows.length === 0)
-    return (
-      <div className="text-sm text-slate-500 bg-slate-900 border border-slate-800 rounded-xl p-4">
-        No bookings yet.
-      </div>
-    );
-  return (
-    <div className="space-y-2">
-      {rows.map((b) => (
-        <TripRow key={b._id} booking={b} />
-      ))}
-    </div>
-  );
-}
+// BookingsPanel was removed — Reports already covers it with date filters.
 
 // ============================================================
 // Clients — Everyone who's ever booked, with trip counts and spend.

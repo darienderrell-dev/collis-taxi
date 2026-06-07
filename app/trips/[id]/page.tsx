@@ -109,6 +109,19 @@ export default function TripPage({
           {fmtMoney(booking.price)}
         </div>
 
+        {/* Echo the passenger's own note back so they can verify what
+            they typed reached the driver. */}
+        {booking.notes && (
+          <div className="mt-3 rounded-xl bg-slate-900 border border-slate-800 p-3">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400 mb-1">
+              Your note to Collis
+            </div>
+            <div className="text-sm text-slate-200">
+              &ldquo;{booking.notes}&rdquo;
+            </div>
+          </div>
+        )}
+
         {/* Driver info card — shows once accepted */}
         {!["requested", "completed", "cancelled", "declined"].includes(
           booking.status,
