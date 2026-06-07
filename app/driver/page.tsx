@@ -13,6 +13,62 @@ import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import { fmtMoney, fmtDateTime, relTime, countdownLabel } from "@/lib/fmt";
 
+/**
+ * Bookings returned by staff queries are enriched on the server with the
+ * passenger's name and phone (see attachClient in convex/bookings.ts).
+ * Driver needs both to call/text the customer.
+ */
+type BookingForDriver = Doc<"bookings"> & {
+  clientName?: string;
+  clientPhone?: string;
+};
+
+/**
+ * Passenger info strip rendered on every driver-facing booking card.
+ * Big tap targets for Call and SMS — Collis shouldn't have to copy a
+ * number out, and the UX needs to survive a glance while driving.
+ */
+function PassengerStrip({
+  name,
+  phone,
+}: {
+  name?: string;
+  phone?: string;
+}) {
+  const display = name?.trim() || "Passenger";
+  // Strip non-digits for tel:/sms: hrefs — keep international/plus characters.
+  const safe = phone?.replace(/[^\d+]/g, "") ?? "";
+  return (
+    <div className="mt-3 rounded-xl bg-slate-950/60 border border-slate-800 p-2.5 flex items-center gap-2">
+      <div className="w-9 h-9 rounded-full bg-slate-800 flex items-center justify-center shrink-0 text-base">
+        👤
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium truncate">{display}</div>
+        <div className="text-xs text-slate-400 truncate">
+          {phone ?? "No phone on file"}
+        </div>
+      </div>
+      {safe && (
+        <>
+          <a
+            href={"tel:" + safe}
+            className="bg-emerald-500 text-slate-950 font-semibold text-xs rounded-full px-3 py-2"
+          >
+            📞 Call
+          </a>
+          <a
+            href={"sms:" + safe}
+            className="bg-sky-500 text-slate-950 font-semibold text-xs rounded-full px-3 py-2"
+          >
+            💬 Text
+          </a>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function DriverPage() {
   return (
     <main className="min-h-dvh flex items-start justify-center p-6 pb-safe-with-install">
@@ -209,7 +265,7 @@ function RequestCard({
   onAccept,
   onDecline,
 }: {
-  booking: Doc<"bookings">;
+  booking: BookingForDriver;
   hasActive: boolean;
   onAccept: () => void;
   onDecline: () => void;
@@ -225,7 +281,8 @@ function RequestCard({
         </div>
         <div className="text-slate-400">{relTime(booking._creationTime)}</div>
       </div>
-      <div className="mt-2 text-sm">
+      <PassengerStrip name={booking.clientName} phone={booking.clientPhone} />
+      <div className="mt-3 text-sm">
         <div className="text-slate-200">
           <span className="text-emerald-400">●</span> {booking.pickupZone}
           {booking.pickupDetail && (
@@ -269,7 +326,7 @@ function ActiveTripCard({
   booking,
   onAdvance,
 }: {
-  booking: Doc<"bookings">;
+  booking: BookingForDriver;
   onAdvance: (
     to: "on_the_way" | "arrived" | "in_progress" | "completed" | "no_show",
   ) => void;
@@ -312,7 +369,8 @@ function ActiveTripCard({
         </div>
         <div className="text-xs text-amber-200">{fmtMoney(booking.price)}</div>
       </div>
-      <div className="text-sm mt-2 space-y-1">
+      <PassengerStrip name={booking.clientName} phone={booking.clientPhone} />
+      <div className="text-sm mt-3 space-y-1">
         <div>
           <span className="text-emerald-400">●</span> {booking.pickupZone}
           {booking.pickupDetail && (
@@ -346,7 +404,7 @@ function UpNextCard({
   hasActive,
   onStart,
 }: {
-  queue: Doc<"bookings">[];
+  queue: BookingForDriver[];
   hasActive: boolean;
   onStart: (id: Id<"bookings">) => void;
 }) {
@@ -363,6 +421,8 @@ function UpNextCard({
           // Driver can start the very next accepted booking if they're not
           // already on a trip. Queued bookings have to wait their turn.
           const canStart = isNext && !hasActive && b.status === "accepted";
+          // Strip non-digits for tel:/sms: hrefs.
+          const safe = b.clientPhone?.replace(/[^\d+]/g, "") ?? "";
           return (
             <div
               key={b._id}
@@ -374,7 +434,7 @@ function UpNextCard({
               }
             >
               <div className="flex items-center justify-between text-sm">
-                <span>
+                <span className="truncate">
                   {b.pickupZone} → {b.dropoffZone}
                 </span>
                 <span
@@ -386,9 +446,34 @@ function UpNextCard({
                   {isQueued && hasActive ? "after current" : countdownLabel(t)}
                 </span>
               </div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                {fmtMoney(b.price)}
+              <div className="flex items-center justify-between text-xs text-slate-400 mt-1">
+                <span className="truncate">
+                  <span aria-hidden>👤</span>{" "}
+                  {b.clientName ?? "Passenger"}
+                  {b.clientPhone && (
+                    <span className="text-slate-500"> · {b.clientPhone}</span>
+                  )}
+                </span>
+                <span className="text-slate-500 ml-2">
+                  {fmtMoney(b.price)}
+                </span>
               </div>
+              {safe && (
+                <div className="flex gap-2 mt-2">
+                  <a
+                    href={"tel:" + safe}
+                    className="flex-1 text-center bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-xs font-semibold rounded-lg py-1.5"
+                  >
+                    📞 Call
+                  </a>
+                  <a
+                    href={"sms:" + safe}
+                    className="flex-1 text-center bg-sky-500/15 border border-sky-500/30 text-sky-200 text-xs font-semibold rounded-lg py-1.5"
+                  >
+                    💬 Text
+                  </a>
+                </div>
+              )}
               {canStart && (
                 <button
                   onClick={() => onStart(b._id)}

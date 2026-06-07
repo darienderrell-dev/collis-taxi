@@ -1,6 +1,25 @@
 import { mutation, query } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { requireStaff, requireUserId } from "./users";
+
+// ---------- helpers ----------
+
+/**
+ * Attach client name + phone to a booking row for staff views.
+ * The driver needs to know who booked them so they can call/text the
+ * passenger. We never expose this to other clients — only callers that
+ * have already passed requireStaff() should use this helper.
+ */
+async function attachClient(ctx: QueryCtx, booking: Doc<"bookings">) {
+  const client = await ctx.db.get(booking.clientUserId);
+  return {
+    ...booking,
+    clientName: client?.name,
+    clientPhone: client?.phone,
+  };
+}
 
 // ---------- queries ----------
 
@@ -63,7 +82,7 @@ export const listAll = query({
     await requireStaff(ctx);
     const rows = await ctx.db.query("bookings").collect();
     rows.sort((a, b) => b._creationTime - a._creationTime);
-    return rows;
+    return Promise.all(rows.map((r) => attachClient(ctx, r)));
   },
 });
 
@@ -76,7 +95,7 @@ export const incomingRequests = query({
       .withIndex("by_status", (q) => q.eq("status", "requested"))
       .collect();
     rows.sort((a, b) => b._creationTime - a._creationTime);
-    return rows;
+    return Promise.all(rows.map((r) => attachClient(ctx, r)));
   },
 });
 
@@ -89,11 +108,10 @@ export const activeTrip = query({
   handler: async (ctx) => {
     await requireStaff(ctx);
     const all = await ctx.db.query("bookings").collect();
-    return (
-      all.find((b) =>
-        ["on_the_way", "arrived", "in_progress"].includes(b.status),
-      ) ?? null
+    const trip = all.find((b) =>
+      ["on_the_way", "arrived", "in_progress"].includes(b.status),
     );
+    return trip ? await attachClient(ctx, trip) : null;
   },
 });
 
@@ -113,7 +131,7 @@ export const upNext = query({
         const tb = b.scheduledFor ?? b._creationTime;
         return ta - tb;
       });
-    return lined;
+    return Promise.all(lined.map((r) => attachClient(ctx, r)));
   },
 });
 
@@ -122,6 +140,64 @@ export const queueDepth = query({
   handler: async (ctx) => {
     const all = await ctx.db.query("bookings").collect();
     return all.filter((b) => b.status === "queued").length;
+  },
+});
+
+// ---------- reports ----------
+
+/**
+ * Aggregate totals for the bookings that fall in a date range.
+ * Trip time = scheduledFor if present, else _creationTime.
+ * Used for the admin "today / this week / this month" tiles.
+ */
+export const summaryForRange = query({
+  args: { startMs: v.number(), endMs: v.number() },
+  handler: async (ctx, { startMs, endMs }) => {
+    await requireStaff(ctx);
+    const all = await ctx.db.query("bookings").collect();
+    const inRange = all.filter((b) => {
+      const t = b.scheduledFor ?? b._creationTime;
+      return t >= startMs && t < endMs;
+    });
+    let count = 0;
+    let revenue = 0;
+    let completed = 0;
+    let cancelled = 0;
+    let pending = 0;
+    for (const b of inRange) {
+      count++;
+      if (b.status === "completed") {
+        completed++;
+        revenue += b.price;
+      } else if (["cancelled", "declined", "no_show"].includes(b.status)) {
+        cancelled++;
+      } else {
+        pending++;
+      }
+    }
+    return { count, revenue, completed, cancelled, pending };
+  },
+});
+
+/**
+ * Detailed list of trips in a date range, with passenger info attached.
+ * Sorted newest first. Used for the admin "Reports" trip list.
+ */
+export const listForRange = query({
+  args: { startMs: v.number(), endMs: v.number() },
+  handler: async (ctx, { startMs, endMs }) => {
+    await requireStaff(ctx);
+    const all = await ctx.db.query("bookings").collect();
+    const inRange = all.filter((b) => {
+      const t = b.scheduledFor ?? b._creationTime;
+      return t >= startMs && t < endMs;
+    });
+    inRange.sort((a, b) => {
+      const ta = a.scheduledFor ?? a._creationTime;
+      const tb = b.scheduledFor ?? b._creationTime;
+      return tb - ta;
+    });
+    return Promise.all(inRange.map((r) => attachClient(ctx, r)));
   },
 });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Authenticated,
   AuthLoading,
@@ -63,7 +63,11 @@ function AdminGate() {
 }
 
 function AdminDashboard({ me }: { me: Doc<"users"> }) {
-  const [tab, setTab] = useState<"pricing" | "bookings" | "clients">("pricing");
+  // Reports lands first because that's the daily-ops view Gale opens to
+  // see "how's the business doing today" — pricing changes are rarer.
+  const [tab, setTab] = useState<"reports" | "pricing" | "bookings" | "clients">(
+    "reports",
+  );
   const { signOut } = useAuthActions();
   return (
     <>
@@ -83,7 +87,7 @@ function AdminDashboard({ me }: { me: Doc<"users"> }) {
       </div>
 
       <div className="flex gap-1 bg-slate-900 rounded-xl p-1 mb-6">
-        {(["pricing", "bookings", "clients"] as const).map((t) => (
+        {(["reports", "pricing", "bookings", "clients"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -97,11 +101,214 @@ function AdminDashboard({ me }: { me: Doc<"users"> }) {
         ))}
       </div>
 
+      {tab === "reports" && <ReportsPanel />}
       {tab === "pricing" && <PricingPanel />}
       {tab === "bookings" && <BookingsPanel />}
       {tab === "clients" && <ClientsPanel />}
     </>
   );
+}
+
+// ============================================================
+// Reports — Today / This week / This month tiles + filterable trip list.
+// Built for Gale: tiles up top so she can answer "how's today going" in a
+// glance; trip list below with passenger names so she can match calls and
+// chase no-shows.
+// ============================================================
+function ReportsPanel() {
+  // Window selector for the trip list at the bottom. The three tiles up
+  // top always show today/week/month no matter what — they're the "at a
+  // glance" numbers and shouldn't move when she filters the list.
+  const [window, setWindow] = useState<"today" | "week" | "month">("today");
+
+  // Memoise so the queries don't refetch on every render.
+  const ranges = useMemo(() => buildRanges(), []);
+
+  const today = useQuery(api.bookings.summaryForRange, ranges.today);
+  const week = useQuery(api.bookings.summaryForRange, ranges.week);
+  const month = useQuery(api.bookings.summaryForRange, ranges.month);
+
+  const listRange =
+    window === "today" ? ranges.today : window === "week" ? ranges.week : ranges.month;
+  const trips = useQuery(api.bookings.listForRange, listRange);
+
+  return (
+    <>
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <SummaryTile label="Today" data={today} accent="amber" />
+        <SummaryTile label="This week" data={week} accent="emerald" />
+        <SummaryTile label="This month" data={month} accent="sky" />
+      </section>
+
+      <section className="mt-6 rounded-2xl bg-slate-900 border border-slate-800 p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-base font-semibold">Trips</div>
+          <div className="flex gap-1 bg-slate-800 rounded-lg p-1 text-xs">
+            {(["today", "week", "month"] as const).map((w) => (
+              <button
+                key={w}
+                onClick={() => setWindow(w)}
+                className={
+                  "px-3 py-1 rounded-md capitalize " +
+                  (window === w ? "bg-slate-600 text-white" : "text-slate-400")
+                }
+              >
+                {w === "week" ? "This week" : w === "month" ? "This month" : "Today"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {trips === undefined && (
+          <div className="text-sm text-slate-500 py-6 text-center">Loading…</div>
+        )}
+        {trips && trips.length === 0 && (
+          <div className="text-sm text-slate-500 py-6 text-center">
+            No trips in this window.
+          </div>
+        )}
+        {trips && trips.length > 0 && (
+          <div className="space-y-2">
+            {trips.map((b) => (
+              <TripRow key={b._id} booking={b} />
+            ))}
+          </div>
+        )}
+      </section>
+    </>
+  );
+}
+
+function SummaryTile({
+  label,
+  data,
+  accent,
+}: {
+  label: string;
+  data:
+    | {
+        count: number;
+        revenue: number;
+        completed: number;
+        cancelled: number;
+        pending: number;
+      }
+    | undefined;
+  accent: "amber" | "emerald" | "sky";
+}) {
+  const accentMap = {
+    amber: "from-amber-500/15 to-amber-500/0 border-amber-500/30 text-amber-200",
+    emerald:
+      "from-emerald-500/15 to-emerald-500/0 border-emerald-500/30 text-emerald-200",
+    sky: "from-sky-500/15 to-sky-500/0 border-sky-500/30 text-sky-200",
+  };
+  return (
+    <div
+      className={
+        "rounded-2xl bg-gradient-to-br border p-4 " + accentMap[accent]
+      }
+    >
+      <div className="text-xs uppercase tracking-wider opacity-80">{label}</div>
+      {data === undefined ? (
+        <div className="text-sm text-slate-400 mt-2">Loading…</div>
+      ) : (
+        <>
+          <div className="mt-1 text-3xl font-bold text-white">
+            {fmtMoney(data.revenue)}
+          </div>
+          <div className="text-xs text-slate-300/80 mt-1">
+            {data.completed} completed
+            {data.pending > 0 && ` · ${data.pending} in progress`}
+            {data.cancelled > 0 && ` · ${data.cancelled} cancelled/no-show`}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5">
+            {data.count} total trip{data.count === 1 ? "" : "s"}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function TripRow({
+  booking,
+}: {
+  booking: Doc<"bookings"> & { clientName?: string; clientPhone?: string };
+}) {
+  const t = booking.scheduledFor ?? booking._creationTime;
+  const isCompleted = booking.status === "completed";
+  const isLost = ["cancelled", "declined", "no_show"].includes(booking.status);
+  return (
+    <div className="p-3 rounded-xl bg-slate-950 border border-slate-800">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-medium truncate">
+          {booking.pickupZone} → {booking.dropoffZone}
+        </div>
+        <div
+          className={
+            "text-[11px] uppercase tracking-wider whitespace-nowrap " +
+            (isCompleted
+              ? "text-emerald-300"
+              : isLost
+              ? "text-rose-300"
+              : "text-amber-300")
+          }
+        >
+          {booking.status.replace(/_/g, " ")}
+        </div>
+      </div>
+      <div className="flex items-center justify-between text-xs mt-1">
+        <div className="text-slate-400 truncate">
+          <span aria-hidden>👤</span>{" "}
+          {booking.clientName ?? "Passenger"}
+          {booking.clientPhone && (
+            <span className="text-slate-500"> · {booking.clientPhone}</span>
+          )}
+        </div>
+        <div
+          className={
+            "whitespace-nowrap ml-2 " +
+            (isCompleted ? "text-emerald-200 font-semibold" : "text-slate-300")
+          }
+        >
+          {fmtMoney(booking.price)}
+        </div>
+      </div>
+      <div className="text-[11px] text-slate-500 mt-0.5">
+        {booking.scheduledFor ? "Scheduled · " : ""}
+        {fmtDateTime(t)}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Compute start/end timestamps (ms) for "today", "this week" (Mon-start),
+ * and "this month" (1st of month). All anchored to user local time.
+ */
+function buildRanges() {
+  const now = new Date();
+  const startOfDay = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
+  // ISO week: Monday is the first day. JS getDay() returns 0=Sun..6=Sat.
+  const dow = now.getDay();
+  const daysSinceMon = (dow + 6) % 7;
+  const startOfWeek = startOfDay - daysSinceMon * 86400000;
+  const startOfMonth = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    1,
+  ).getTime();
+  // End at "now + 1 day" so scheduled-for-later-today rows still show up.
+  const endMs = startOfDay + 86400000;
+  return {
+    today: { startMs: startOfDay, endMs },
+    week: { startMs: startOfWeek, endMs },
+    month: { startMs: startOfMonth, endMs },
+  };
 }
 
 // ============================================================
@@ -395,7 +602,7 @@ function PriceEditor({
 }
 
 // ============================================================
-// All bookings
+// All bookings — full history (Reports is the daily view)
 // ============================================================
 function BookingsPanel() {
   const rows = useQuery(api.bookings.listAll);
@@ -409,27 +616,7 @@ function BookingsPanel() {
   return (
     <div className="space-y-2">
       {rows.map((b) => (
-        <div
-          key={b._id}
-          className="p-3 rounded-xl bg-slate-900 border border-slate-800"
-        >
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-medium">
-              {b.pickupZone} → {b.dropoffZone}
-            </div>
-            <div className="text-[11px] uppercase tracking-wider text-amber-300">
-              {b.status.replace(/_/g, " ")}
-            </div>
-          </div>
-          <div className="flex items-center justify-between text-xs mt-1">
-            <div className="text-slate-500">
-              {b.scheduledFor
-                ? "For " + fmtDateTime(b.scheduledFor)
-                : "ASAP — " + fmtDateTime(b._creationTime)}
-            </div>
-            <div className="text-slate-200">{fmtMoney(b.price)}</div>
-          </div>
-        </div>
+        <TripRow key={b._id} booking={b} />
       ))}
     </div>
   );
